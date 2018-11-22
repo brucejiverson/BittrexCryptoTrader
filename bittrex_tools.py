@@ -70,11 +70,15 @@ def plot_market(df):
     # strat_return, market_performance))
 
     df.plot(x='Date', y='Close', ax=ax)
+    try:
+        df[df['Critical'] != ''].plot(x ='Date', y='Close', ax=ax, color = 'red', style = '.')
+    except TypeError:
+        print("No critical points to plot")
     fig.autofmt_xdate()
-    plt.show()  # this is the timerange to look for local extremes
+    plt.show()
 
 
-def process(df, win):
+def process(orig_df, win):
     #this function should take in a historical df, assuming that the most recent
     #date is the most current information, and should identify/update the
     #critical mins and maxes, and then construct top and bottom lines based on those points
@@ -85,50 +89,41 @@ def process(df, win):
     large_win = timedelta(hours = win/f)
     cushion = (large_win - small_win)/2
 
-
     #iterrate backwards in time through the df looking for crit points
-    df.sort_values(by = 'Date', inplace = True, ascending = False)
+    #new df is created to help ensure that nothing is changed if df passed by reference
+    df = orig_df.sort_values(by = 'Date', ascending = False)
 
     #go through every date... this shouldnt be necessary, should only have to go through a few
     #the window is defined with 'date as the largest value in the slice, so backwards in time from date
     #assumes a 1 hr
+    my_dict = {}
     for idx, date in df.Date.iteritems():
         #stop if the window extends past the range there is data for
         if date - large_win < df.Date.min():
             break
         #robust enough to check acutal dates and not just index so that smaller granularities are possible
-        small_slice =
-        large_slice = df[df['Date'] > date - large_win].loc[i::]
-        is_critmax =
-        is_critmin =
-        if is_critmax:
-
-        elif is_critmin:
+        s_slice = df[df['Date'] <= date - cushion]
+        s_slice = s_slice[s_slice['Date'] >= date - cushion - small_win]
+        l_slice = df[df['Date'] >= date - large_win]
+        l_slice = l_slice[l_slice['Date'] <= date]
 
 
+        s_min_idx = s_slice.Close.idxmin(); s_max_idx = s_slice.Close.idxmax()
+        l_min_idx = l_slice.Close.idxmin(); l_max_idx = l_slice.Close.idxmax()
 
+        if s_min_idx == l_min_idx:
+            orig_df.loc[s_min_idx, 'Critical'] = 'cmin'
+        if s_max_idx == l_max_idx:
+            orig_df.loc[s_max_idx, 'Critical'] = 'cmax'
+    return orig_df
+    #     print(s_slice.head())
+    #     print(s_min_idx)
+    # print(orig_df[orig_df['Critical'] != ''])
     # define the convention: lmin, lmax, cmin, cmax
-    # find the most recent critical max/min
-    # try:
-    #     most_recent_date = df.loc[df['Critical'] != '' ].iloc[0]
-    # except IndexError:
-    #     #there is no data, this is the initialization case
-    #     #identify all local min and maxes
-    #     most_recent_date = df.iloc[0]['Date'] #why do i have this again...
-    #     df[df[]]
-
-    # df.loc[df['Date'] >= most_recent_date, ]
-    # for i, row in reversed(df.iterrows()):
-    #     if (row):
-    #         pass
-    # #identitfy new local mins/maxes
-
-    # filter all mins/maxes for critical points
-
-    # identify any new local mins/maxes
 
 
-def backtest(df, start, end, desired_trading_period):
+
+def backtest(df, start, end, des_trdng_prd):
 
     df['Critical'] = ''
     account_log = pd.DataFrame(
@@ -138,14 +133,21 @@ def backtest(df, start, end, desired_trading_period):
     money = 100
     fees = 0.003  # standard fees are 0.3% per transaction
     # for each data point from start to finish, check the strategy and calculate the money
+    df = df[df['Date'] >= start]
+    df = df[df['Date'] <= end]
+    df.sort_values(by = 'Date', inplace = True)
+    df.reset_index(inplace = True, drop = True)
     date = start
+    df = process(df, des_trdng_prd*12)
+    # print(df[df.Critical != ''])
+    # print(df.head())
     # while date <= end:
     #     # get the next data point and append it to the data frame
     #     date = min(start + timedelta(seconds = data.granularity), end)
     #     data.new_datapoint(date)
     #
     #     type = ''
-    #     strategy_result = strategy(data, desired_trading_period)
+    #     strategy_result = strategy(data, des_trdng_prd)
     #     if (strategy_result == "bullish" and not in_market):
     #         # buy
     #         # log trade
@@ -168,6 +170,7 @@ def backtest(df, start, end, desired_trading_period):
     #                        'Date', 'Account Value (USD)', 'Trades']), ignore_index=True)
 
     # plot the account value
+    plot_market(df)
 
     #return ROI(account_value, 100), account_log
 

@@ -36,9 +36,6 @@ data.reset_index(inplace=True, drop=True)
 # overwrite_csv_file(updated_path, data)
 
 
-start_date = datetime(2018, 10, 26)
-end_date = datetime(2018, 10, 27)
-# backtest(start_date, end_date, 3)
-# process(data, 36)
-
-plot_market(data)
+start_date = datetime(2018, 1, 26)
+end_date = datetime(2018, 11, 21)
+backtest(data, start_date, end_date, 100)
