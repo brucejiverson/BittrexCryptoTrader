@@ -1,31 +1,41 @@
+from helios import *
 from bittrex.bittrex import *
 import json
 import pandas as pd
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import numpy as np
+from scipy.optimize import curve_fit
+import sys
+sys.path.append("C:\Python Programs\CryptoTrader\CryptoTraderStrategy")
 
-#I had a ton of trouble getting the plots to look right with the dates. I eventually figured out to use ___ type date formatting
-#This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
+# I had a ton of trouble getting the plots to look right with the dates. I eventually figured out to use ___ type date formatting
+# This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
+
 
 def process_bittrex_dict(dict):
     # V and BV refer to volume and base volume
     df = pd.DataFrame(dict['result'])
     df.drop(columns=["BV", "V"])
-    df = df.rename(columns={'T': "Date", 'O': 'Open', 'H': 'High', 'L': 'Low', 'C': 'Close'})
+    df = df.rename(columns={'T': "Date", 'O': 'Open',
+                            'H': 'High', 'L': 'Low', 'C': 'Close'})
 
     # reorder the columns (defaults to alphabetic)
     df = df[['Date', 'Open', 'High', 'Low', 'Close']]
-    df.reset_index(inplace = True, drop = True)
+    df.reset_index(inplace=True, drop=True)
     # dates into datetimes
-    df.Date = pd.to_datetime(df.Date, format = "%Y-%m-%dT%H:%M:%S")
+    df.Date = pd.to_datetime(df.Date, format="%Y-%m-%dT%H:%M:%S")
     return df
 
 
-def original_csv_to_df(path, oldest_month, oldest_day, oldest_year):
+def original_csv_to_df(path_dict, oldest_month, oldest_day, oldest_year):
     # get the historic data
-    dateparse = lambda x: pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
-    df = pd.read_csv(path, header=1, parse_dates = ['Date'], date_parser = dateparse)
+    path = path_dict['Download']
+
+    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
+    df = pd.read_csv(path, header=1, parse_dates=[
+                     'Date'], date_parser=dateparse)
 
     df.drop(columns=["Symbol", "Volume From", "Volume To"])
     df = df[['Date', 'Open', 'High', 'Low', 'Close']]
@@ -33,151 +43,174 @@ def original_csv_to_df(path, oldest_month, oldest_day, oldest_year):
     oldest = datetime(day=oldest_day, month=oldest_month, year=oldest_year)
     df = df[df['Date'] > oldest]
     df.sort_values(by='Date', inplace=True)
-    df.reset_index(inplace = True, drop = True)
+    df.reset_index(inplace=True, drop=True)
     return df
 
 
-def updated_csv_to_df(path, oldest_month, oldest_day, oldest_year):
+def updated_csv_to_df(path_dict, oldest_month, oldest_day, oldest_year):
     # get the historic data
-    dateparse = lambda x: pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
-    df = pd.read_csv(path, parse_dates = ['Date'], date_parser = dateparse)
+    path = path_dict['Updated']
+
+    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
+    df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
 
     # df.drop(columns=["Symbol"])
     df = df[['Date', 'Open', 'High', 'Low', 'Close']]
-
     oldest = datetime(day=oldest_day, month=oldest_month, year=oldest_year)
+    oldest_in_df = df.Date.min()
+
+    if oldest_in_df > oldest:  # need to fetch from original
+        orig_df = original_csv_to_df(
+            path_dict, oldest_month, oldest_day, oldest_year)
+        df = df.append(orig_df)
+
     df = df[df['Date'] > oldest]
     df.sort_values(by='Date', inplace=True)
-    df.reset_index(inplace = True, drop = True)
+    df.reset_index(inplace=True, drop=True)
     return df
 
 
 def overwrite_csv_file(path, df):
-    #must create new df as df is passed by reference
+    # must create new df as df is passed by reference
     # datetimes to strings
     for i, row in df.iterrows():
         date = row.loc['Date']
         df.loc[i, 'Date'] = date.strftime("%Y-%m-%d %I-%p")
     df.to_csv(path)
-    df.Date = pd.to_datetime(df.Date, format = "%Y-%m-%d %I-%p")
+    df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p")
 
 
-def plot_market(df):
+def plot_market(df, lines=None):
+    starting_amnt = df[df['Account Value'] != 0].reset_index(drop = True).loc[0, 'Account Value']
+    starting_price = df[df['Account Value '] != 0].reset_index(drop = True).loc[0, 'Close']
+    final_amnt = df['Account Value'].iloc[-1]
+    strat_return = ROI(final_amnt, starting_amnt)
+    market_performance = ROI(starting_price, df.Close.iloc[-1])
+
     fig, ax = plt.subplots()
     x_text = df.loc[0, 'Date']
     y_text = df['Close'].max()
-    # ax.text(x_text, y_text, 'ROI = {} %, Market Performance = {} %'.format(
-    # strat_return, market_performance))
+    ax.text(x_text, y_text, 'ROI = {} %, Market Performance = {} %'.format(
+        strat_return, market_performance))
 
     df.plot(x='Date', y='Close', ax=ax)
     try:
-        df[df['Critical'] != ''].plot(x ='Date', y='Close', ax=ax, color = 'red', style = '.')
+        df[df['Critical'] != ''].plot(
+            x='Date', y='Close', ax=ax, color='red', style='.')
     except TypeError:
         print("No critical points to plot")
+
+    if lines is not None:
+        lines.plot(x='Date', y='mins', ax=ax)
+        lines.plot(x='Date', y='maxs', ax=ax)
+
+    if 'Account Value' in df:
+        df[df.Type == 'buy'].plot(x='Date', y='Close', ax=ax)
+        df[df.Type == 'sell'].plot(x='Date', y='Close', ax=ax)
+
     fig.autofmt_xdate()
     plt.show()
 
 
-def process(orig_df, win):
-    #this function should take in a historical df, assuming that the most recent
-    #date is the most current information, and should identify/update the
-    #critical mins and maxes, and then construct top and bottom lines based on those points
+def constructLines(df):
+    maxs = df[df.Critical == 'cmax']
+    mins = df[df.Critical == 'cmin']
 
-    # window is the timerange to look for local extremes in hours
-    f = 0.7
-    small_win = timedelta(hours=win)
-    large_win = timedelta(hours = win/f)
-    cushion = (large_win - small_win)/2
+    # function to fit
+    def f(x, m, b):
+        return m * x + b
 
-    #iterrate backwards in time through the df looking for crit points
-    #new df is created to help ensure that nothing is changed if df passed by reference
-    df = orig_df.sort_values(by = 'Date', ascending = False)
+    # calculate the lines
+    min_p, min_cov = curve_fit(f, mdates.date2num(mins.Date), mins.Close)
+    max_p, max_cov = curve_fit(f, mdates.date2num(maxs.Date), maxs.Close)
 
-    #go through every date... this shouldnt be necessary, should only have to go through a few
-    #the window is defined with 'date as the largest value in the slice, so backwards in time from date
-    #assumes a 1 hr
-    my_dict = {}
-    for idx, date in df.Date.iteritems():
-        #stop if the window extends past the range there is data for
-        if date - large_win < df.Date.min():
-            break
-        #robust enough to check acutal dates and not just index so that smaller granularities are possible
-        s_slice = df[df['Date'] <= date - cushion]
-        s_slice = s_slice[s_slice['Date'] >= date - cushion - small_win]
-        l_slice = df[df['Date'] >= date - large_win]
-        l_slice = l_slice[l_slice['Date'] <= date]
+    # min_p = np.polyfit(mins.Date, mins.Close, 1)
+    # max_p = np.polyfit(maxs.Date, maxs.Close, 1)
 
+    xs = mdates.date2num(df.Date)
 
-        s_min_idx = s_slice.Close.idxmin(); s_max_idx = s_slice.Close.idxmax()
-        l_min_idx = l_slice.Close.idxmin(); l_max_idx = l_slice.Close.idxmax()
+    lines_data = pd.DataFrame(data={'Date': mdates.num2date(xs)})
+    lines_data['mins'] = f(xs, *min_p)
+    lines_data['maxs'] = f(xs, *max_p)
 
-        if s_min_idx == l_min_idx:
-            orig_df.loc[s_min_idx, 'Critical'] = 'cmin'
-        if s_max_idx == l_max_idx:
-            orig_df.loc[s_max_idx, 'Critical'] = 'cmax'
-    return orig_df
-    #     print(s_slice.head())
-    #     print(s_min_idx)
-    # print(orig_df[orig_df['Critical'] != ''])
-    # define the convention: lmin, lmax, cmin, cmax
+    # for i, x in enumerate(xs):
+    #     min = min_p[0] * x + min_p[1]
+    #     max = max_p[0] * x + max_p[1]
+    #     lines_data.loc[i, 'mins'] = min
+    #     lines_data.loc[i, 'maxs'] = max
+
+    return [min_p, max_p], lines_data
 
 
+def backtest(df, start, end, trdng_prd):
+    # TODO throw an error here if end > start
 
-def backtest(df, start, end, des_trdng_prd):
-
+    #trdng_prd in days
     df['Critical'] = ''
-    account_log = pd.DataFrame(
-        columns=['Date', 'Account Value (USD)', 'Trades'])
+    df['Account Value'] = 0
+    df['Trades'] = ''
+    # account_log = pd.DataFrame(
+    #     columns=['Date', 'Account Value (USD)', 'Trades'])
 
     in_market = False
     money = 100
     fees = 0.003  # standard fees are 0.3% per transaction
+    fees = 1 - fees
     # for each data point from start to finish, check the strategy and calculate the money
     df = df[df['Date'] >= start]
     df = df[df['Date'] <= end]
-    df.sort_values(by = 'Date', inplace = True)
-    df.reset_index(inplace = True, drop = True)
+    df.sort_values(by='Date', inplace=True)
+    df.reset_index(inplace=True, drop=True)
+
     date = start
-    df = process(df, des_trdng_prd*12)
-    # print(df[df.Critical != ''])
-    # print(df.head())
-    # while date <= end:
-    #     # get the next data point and append it to the data frame
-    #     date = min(start + timedelta(seconds = data.granularity), end)
-    #     data.new_datapoint(date)
-    #
-    #     type = ''
-    #     strategy_result = strategy(data, des_trdng_prd)
-    #     if (strategy_result == "bullish" and not in_market):
-    #         # buy
-    #         # log trade
-    #         money *= slice.loc['close']
-    #         type = "buy"
-    #     elif (strategy_result == "bearish" and in_market):
-    #         # sell
-    #         # log trade
-    #         money = money / slice.loc['close']
-    #         type = "sell"
-    #         pass
-    #
-    #     # determine the account value
-    #     if in_market:
-    #         account_value = money / slice.loc['close']
-    #     else:
-    #         account_value = money
+
+    df = findCriticalPoints(df, trdng_prd)
+
+    coeffs, line_data = constructLines(df)
+    #TO DO: eliminate the need for the market df. need to increase efficiency.
+    # While it takes more memory and is probably slower, a new df is created
+    # (market) in order to ensure the strategy is operating on only the information
+    # it should be
+    market = pd.DataFrame(columns=df.columns)
+    # df is arranged oldest to newest
+    for i, row in df.iterrows():
+        market.append(row)
+        if row.Date <= start + timedelta(hours=trdng_prd * 24):
+            continue
+
+        market = findCriticalPoints(df, trdng_prd)
+        coeffs, line_data = constructLines(market)
+        strategy_result = strategy(market, coeffs, trdng_prd)
+
+        type = ''
+        if (strategy_result == "bullish" and not in_market):
+            # buy
+            money *= row.loc['Close'] * fees
+            type = "buy"
+
+        elif (strategy_result == "bearish" and in_market):
+            # sell
+            money = money / row.loc['Close']
+            type = "sell"
+
+        if in_market:
+            market.loc[i, 'Account Value'] = money / row.loc['Close']
+        else:
+            market.loc[i, 'Account Value'] = money
+
+        market.loc[i, 'Trades'] = type
+
     #     # update log w date from row, account value, and if a trade was executed
-    #     account_log.append(pd.DataFrame(data=[slice.loc['date'], account_value, type], columns=[
+    #     account_log.append(pd.DataFrame(df=[row.loc['date'], account_value, type], columns=[
     #                        'Date', 'Account Value (USD)', 'Trades']), ignore_index=True)
 
-    # plot the account value
-    plot_market(df)
+    plot_market(market, line_data)
 
-    #return ROI(account_value, 100), account_log
+    # return ROI(account_value, 100), account_log
 
 
 def run():
     pass
-
 
 def ROI(final, initial):
     return round(final / initial - 1, 5) * 100
