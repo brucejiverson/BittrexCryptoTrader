@@ -23,7 +23,7 @@ else:
     print("Failed to get candle data")
 
 data = data.append(new_data)
-data = data.sort_values(by='Date')a
+data = data.sort_values(by='Date')
 data = data.drop_duplicates(['Date'])
 data.reset_index(inplace=True, drop=True)
 overwrite_csv_file(paths['Updated'], data)

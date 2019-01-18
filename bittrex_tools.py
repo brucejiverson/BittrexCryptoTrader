@@ -1,4 +1,4 @@
-from helios import *
+
 from bittrex.bittrex import *
 import json
 import pandas as pd
@@ -9,10 +9,9 @@ import numpy as np
 from scipy.optimize import curve_fit
 import sys
 sys.path.append("C:\Python Programs\CryptoTrader\CryptoTraderStrategy")
-
+from helios import *
 # I had a ton of trouble getting the plots to look right with the dates. I eventually figured out to use ___ type date formatting
 # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
-
 
 def process_bittrex_dict(dict):
     # V and BV refer to volume and base volume
@@ -80,9 +79,10 @@ def overwrite_csv_file(path, df):
     df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p")
 
 
-def plot_market(df, lines=None):
-    starting_amnt = df[df['Account Value'] != 0].reset_index(drop = True).loc[0, 'Account Value']
-    starting_price = df[df['Account Value '] != 0].reset_index(drop = True).loc[0, 'Close']
+def plot_market(df, strt, lines=None):
+    starting_info = df[df.Date == strt]
+    starting_amnt = starting_info.loc[:,'Account Value']
+    starting_price = starting_info.loc[:,'Close']
     final_amnt = df['Account Value'].iloc[-1]
     strat_return = ROI(final_amnt, starting_amnt)
     market_performance = ROI(starting_price, df.Close.iloc[-1])
@@ -127,11 +127,9 @@ def constructLines(df):
     # min_p = np.polyfit(mins.Date, mins.Close, 1)
     # max_p = np.polyfit(maxs.Date, maxs.Close, 1)
 
-    xs = mdates.date2num(df.Date)
-
-    lines_data = pd.DataFrame(data={'Date': mdates.num2date(xs)})
-    lines_data['mins'] = f(xs, *min_p)
-    lines_data['maxs'] = f(xs, *max_p)
+    lines_data = pd.DataFrame(data={'Date': df.Date})
+    lines_data['mins'] = f(mdates.date2num(df.Date), *min_p)
+    lines_data['maxs'] = f(mdates.date2num(df.Date), *max_p)
 
     # for i, x in enumerate(xs):
     #     min = min_p[0] * x + min_p[1]
@@ -146,9 +144,7 @@ def backtest(df, start, end, trdng_prd):
     # TODO throw an error here if end > start
 
     #trdng_prd in days
-    df['Critical'] = ''
-    df['Account Value'] = 0
-    df['Trades'] = ''
+
     # account_log = pd.DataFrame(
     #     columns=['Date', 'Account Value (USD)', 'Trades'])
 
@@ -156,18 +152,23 @@ def backtest(df, start, end, trdng_prd):
     money = 100
     fees = 0.003  # standard fees are 0.3% per transaction
     fees = 1 - fees
+
+    df['Critical'] = ''
+    df['Account Value'] = money
+    df['Trades'] = ''
+
     # for each data point from start to finish, check the strategy and calculate the money
-    df = df[df['Date'] >= start]
+    df = df[df['Date'] >= start - timedelta(hours=trdng_prd)] #TODO
     df = df[df['Date'] <= end]
     df.sort_values(by='Date', inplace=True)
     df.reset_index(inplace=True, drop=True)
 
     date = start
 
-    df = findCriticalPoints(df, trdng_prd)
-
-    coeffs, line_data = constructLines(df)
-    #TO DO: eliminate the need for the market df. need to increase efficiency.
+    # df = findCriticalPoints(df, trdng_prd)
+    #
+    # coeffs, line_data = constructLines(df)
+    # TO DO: eliminate the need for the market df. need to increase efficiency.
     # While it takes more memory and is probably slower, a new df is created
     # (market) in order to ensure the strategy is operating on only the information
     # it should be
@@ -178,7 +179,13 @@ def backtest(df, start, end, trdng_prd):
         if row.Date <= start + timedelta(hours=trdng_prd * 24):
             continue
 
-        market = findCriticalPoints(df, trdng_prd)
+        market = findCriticalPoints(market, trdng_prd)
+        # Check that there are enough critical points to fit lines
+        maxs_num = market[market.Critical == 'cmax'].Date.count()
+        mins_num = market[market.Critical == 'cmin'].Date.count()
+        if maxs_num < 2 or mins_num < 2:
+            continue
+
         coeffs, line_data = constructLines(market)
         strategy_result = strategy(market, coeffs, trdng_prd)
 
@@ -187,11 +194,13 @@ def backtest(df, start, end, trdng_prd):
             # buy
             money *= row.loc['Close'] * fees
             type = "buy"
+            print('Buy at: ', row.loc['Close'], 'on: ', row.loc['Date'])
 
         elif (strategy_result == "bearish" and in_market):
             # sell
             money = money / row.loc['Close']
             type = "sell"
+            print('Sell at: ', row.loc['Close'], 'on: ', row.loc['Date'])
 
         if in_market:
             market.loc[i, 'Account Value'] = money / row.loc['Close']
@@ -203,14 +212,17 @@ def backtest(df, start, end, trdng_prd):
     #     # update log w date from row, account value, and if a trade was executed
     #     account_log.append(pd.DataFrame(df=[row.loc['date'], account_value, type], columns=[
     #                        'Date', 'Account Value (USD)', 'Trades']), ignore_index=True)
-
-    plot_market(market, line_data)
+    if "line_data" in locals():
+        plot_market(market, start, line_data)
+    else:
+        plot_market(market, start)
 
     # return ROI(account_value, 100), account_log
 
 
 def run():
     pass
+
 
 def ROI(final, initial):
     return round(final / initial - 1, 5) * 100
