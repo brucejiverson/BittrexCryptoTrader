@@ -14,6 +14,8 @@ from helios import *
 # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
 
 def process_bittrex_dict(dict):
+    #This function converts the dictionaries recieved from bittrex into a
+    #Dataframe formatted the same as
     # V and BV refer to volume and base volume
     df = pd.DataFrame(dict['result'])
     df.drop(columns=["BV", "V"])
@@ -28,17 +30,19 @@ def process_bittrex_dict(dict):
     return df
 
 
-def original_csv_to_df(path_dict, oldest_month, oldest_day, oldest_year):
+def original_csv_to_df(path_dict, symbol, oldest_month, oldest_day, oldest_year):
+    #This is now outdated as all formatting has been standardized to the
+    #Format of the csv as originally downloaded.
+
     # get the historic data
     path = path_dict['Download']
 
-    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
+    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d")
     df = pd.read_csv(path, header=1, parse_dates=[
                      'Date'], date_parser=dateparse)
 
-    df.drop(columns=["Symbol", "Volume From", "Volume To"])
+    df.drop(columns=["Symbol", "Volume USD", "Volume " + symbol[0:3]])
     df = df[['Date', 'Open', 'High', 'Low', 'Close']]
-
     oldest = datetime(day=oldest_day, month=oldest_month, year=oldest_year)
     df = df[df['Date'] > oldest]
     df.sort_values(by='Date', inplace=True)
@@ -70,6 +74,9 @@ def updated_csv_to_df(path_dict, oldest_month, oldest_day, oldest_year):
 
 
 def overwrite_csv_file(path, df):
+    #This function writes the information in the original format to the csv file
+    #including new datapoints that have been fetched
+
     # must create new df as df is passed by reference
     # datetimes to strings
     for i, row in df.iterrows():
@@ -80,37 +87,44 @@ def overwrite_csv_file(path, df):
 
 
 def plot_market(df, strt, lines=None):
-    starting_info = df[df.Date == strt]
-    starting_amnt = starting_info.loc[:,'Account Value']
-    starting_price = starting_info.loc[:,'Close']
-    final_amnt = df['Account Value'].iloc[-1]
-    strat_return = ROI(final_amnt, starting_amnt)
-    market_performance = ROI(starting_price, df.Close.iloc[-1])
 
+    starting_info = df[df.Date == strt]
+
+    #Create the figure
     fig, ax = plt.subplots()
     x_text = df.loc[0, 'Date']
     y_text = df['Close'].max()
-    ax.text(x_text, y_text, 'ROI = {} %, Market Performance = {} %'.format(
-        strat_return, market_performance))
 
     df.plot(x='Date', y='Close', ax=ax)
-    try:
-        df[df['Critical'] != ''].plot(
-            x='Date', y='Close', ax=ax, color='red', style='.')
-    except TypeError:
-        print("No critical points to plot")
-
-    if lines is not None:
-        lines.plot(x='Date', y='mins', ax=ax)
-        lines.plot(x='Date', y='maxs', ax=ax)
 
     if 'Account Value' in df:
         df[df.Type == 'buy'].plot(x='Date', y='Close', ax=ax)
         df[df.Type == 'sell'].plot(x='Date', y='Close', ax=ax)
 
+        starting_amnt = starting_info.loc[:,'Account Value']
+        starting_price = starting_info.loc[:,'Close']
+        final_amnt = df['Account Value'].iloc[-1]
+        strat_return = ROI(final_amnt, starting_amnt)
+        market_performance = ROI(starting_price, df.Close.iloc[-1])
+
+        #Plot lines if any
+        if lines is not None:
+            lines.plot(x='Date', y='mins', ax=ax)
+            lines.plot(x='Date', y='maxs', ax=ax)
+
+        #Plot the critical points if any
+        try:
+            df[df['Critical'] != ''].plot(
+                x='Date', y='Close', ax=ax, color='red', style='.')
+        except TypeError:
+            print("No critical points to plot")
+
+        ax.text(x_text, y_text, 'ROI = {} %, Market Performance = {} %'.format(
+            strat_return, market_performance))
+
+
     fig.autofmt_xdate()
     plt.show()
-
 
 def constructLines(df):
     maxs = df[df.Critical == 'cmax']
