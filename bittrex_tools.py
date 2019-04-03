@@ -27,7 +27,7 @@ def process_bittrex_dict(dict):
     return df
 
 
-def original_csv_to_df(path_dict, symbol, oldest_month, oldest_day, oldest_year):
+def original_csv_to_df(path_dict, symbol, desired_granularity, oldest):
     #This is now outdated as all formatting has been standardized to the
     #Format of the csv as originally downloaded.
 
@@ -37,14 +37,22 @@ def original_csv_to_df(path_dict, symbol, oldest_month, oldest_day, oldest_year)
     def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
     df = pd.read_csv(path, parse_dates=['Timestamp'], date_parser=dateparse)
 
+    #Format according to my specifications
     df.rename(columns = {'Timestamp': 'Date'}, inplace =True)
-
     df.drop(columns=["Volume_(" + symbol[0:3] + ')', 'Volume_(Currency)', 'Weighted_Price'])
     df = df[['Date', 'Open', 'High', 'Low', 'Close']]
-    oldest = datetime(day=oldest_day, month=oldest_month, year=oldest_year)
     df = df[df['Date'] > oldest]
     df.sort_values(by='Date', inplace=True)
     df.reset_index(inplace=True, drop=True)
+
+    #Remove datapoints according to desired des_granularity assume input in minutes
+    count = 0
+    count_lim = 60*desired_granularity
+
+    #This should be updated to save the on the hour rows and be made more effcient
+    df = df[df['Date'].dt.minute == 0]
+    # print(type(df['Date'].dt.minute))
+
     return df
 
 
@@ -71,15 +79,13 @@ def updated_csv_to_df(path_dict, oldest_month, oldest_day, oldest_year):
     return df
 
 
-def overwrite_csv_file(path, df):
+def overwrite_csv_file(path_dict, df):
     #This function writes the information in the original format to the csv file
     #including new datapoints that have been fetched
-
+    path = path_dict['Updated']
     # must create new df as df is passed by reference
     # datetimes to strings
-    for i, row in df.iterrows():
-        date = row.loc['Date']
-        df.loc[i, 'Date'] = date.strftime("%Y-%m-%d %I-%p")
+    df['Date'] = df['Date'].dt.strftime("%Y-%m-%d %I-%p")
     df.to_csv(path)
     df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p")
 
