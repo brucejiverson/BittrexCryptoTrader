@@ -1,4 +1,3 @@
-
 from bittrex.bittrex import *
 import json
 import pandas as pd
@@ -7,9 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 from scipy.optimize import curve_fit
-import sys
-sys.path.append("C:\Python Programs\CryptoTrader\CryptoTraderStrategy")
-from helios import *
+
 # I had a ton of trouble getting the plots to look right with the dates. I eventually figured out to use ___ type date formatting
 # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
 
@@ -37,11 +34,12 @@ def original_csv_to_df(path_dict, symbol, oldest_month, oldest_day, oldest_year)
     # get the historic data
     path = path_dict['Download']
 
-    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d")
-    df = pd.read_csv(path, header=1, parse_dates=[
-                     'Date'], date_parser=dateparse)
+    def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+    df = pd.read_csv(path, parse_dates=['Timestamp'], date_parser=dateparse)
 
-    df.drop(columns=["Symbol", "Volume USD", "Volume " + symbol[0:3]])
+    df.rename(columns = {'Timestamp': 'Date'}, inplace =True)
+
+    df.drop(columns=["Volume_(" + symbol[0:3] + ')', 'Volume_(Currency)', 'Weighted_Price'])
     df = df[['Date', 'Open', 'High', 'Low', 'Close']]
     oldest = datetime(day=oldest_day, month=oldest_month, year=oldest_year)
     df = df[df['Date'] > oldest]

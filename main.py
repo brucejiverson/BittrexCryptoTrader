@@ -5,13 +5,22 @@ import pandas as pd
 
 #New place to download: https://www.kaggle.com/jessevent/all-crypto-currencies iSinkInWater, brucejamesiverson@gmail.com, I**********
 
+os = 'linux' #linux or windows
+
 symbol = 'BTCUSD' #Example: 'BTCUSD'
-paths = {'Download': '/Users/biver/Downloads/Bittrex_' + symbol + '_d.csv', 'Updated': '/Users/biver/Downloads/Updated_' + symbol + '_1h.csv'}
+if os == 'linux':
+    paths = {'Download': '/home/bruce/AlgoTrader/BittrexTrader/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv', 'Updated': 'updated_file_' + symbol + '.csv'}
+    secret_path = "/home/bruce/Documents/Crypto/secrets.json"
+elif os == 'windows':
+    paths = {'Download': '/Users/biver/Downloads/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv', 'Updated': '/Users/biver/Downloads/Updated_' + symbol + '.csv'}
+    secret_path = "/Users/biver/Documents/Crypto/secrets.json"
 data = original_csv_to_df(paths, symbol, 1, 1, 2018)
 # data = updated_csv_to_df(paths, 8, 1, 2018)  # oldest date info
 
 # get my keys
-with open("/Users/biver/Documents/Crypto/secrets.json") as secrets_file:
+#linux path /home/bruce/Documents/Crypto/secrets.json
+#windows path /Documents/Crypto/secrets.json
+with open(secret_path) as secrets_file:
     keys = json.load(secrets_file)
     secrets_file.close()
 
