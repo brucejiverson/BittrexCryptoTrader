@@ -8,8 +8,10 @@ import pandas as pd
 os = 'windows' #linux or windows
 des_granularity = 1 #in hours
 symbol = 'BTCUSD' #Example: 'BTCUSD'
-start_date = datetime(2019, 1, 1)
-end_date = datetime(2018, 7, 3)
+start_date = datetime(2019, 1, 15)
+end_date = datetime(2019, 4, 3)
+trading_period = 7
+data_start = start_date - timedelta(hours=trading_period)
 
 if os == 'linux':
     paths = {'Download': '/home/bruce/AlgoTrader/BittrexTrader/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv', 'Updated': '/home/bruce/AlgoTrader/updated_file_' + symbol + '.csv'}
@@ -17,8 +19,10 @@ if os == 'linux':
 elif os == 'windows':
     paths = {'Download': '/Users/biver/Downloads/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv', 'Updated': '/Users/biver/Downloads/Updated_' + symbol + '.csv'}
     secret_path = "/Users/biver/Documents/Crypto/secrets.json"
-data = original_csv_to_df(paths, symbol, des_granularity, start_date)
-# data = updated_csv_to_df(paths, 1, 1, 2017)  # oldest date info
+else:
+    print('Unknown OS')
+# data = original_csv_to_df(paths, symbol, des_granularity, data_start)
+data = updated_csv_to_df(paths, symbol, des_granularity, data_start)  # oldest date info
 print('Historical data has been fetched from CSV.')
 # get my keys
 with open(secret_path) as secrets_file:
@@ -39,6 +43,5 @@ data = data.drop_duplicates(['Date'])
 data.reset_index(inplace=True, drop=True)
 overwrite_csv_file(paths, data)
 
-#print(data.head())
-plot_market(data, start_date)
-#backtest(data, start_date, end_date, 30)
+# fig, ax = plot_market(data, start_date)
+backtest(data, start_date, end_date, trading_period)
