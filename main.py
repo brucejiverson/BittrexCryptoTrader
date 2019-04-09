@@ -9,7 +9,7 @@ os = 'windows' #linux or windows
 des_granularity = 1 #in hours
 symbol = 'BTCUSD' #Example: 'BTCUSD'
 start_date = datetime(2019, 1, 15)
-end_date = datetime(2019, 4, 3)
+end_date = datetime(2018, 4, 9)
 trading_period = 7
 data_start = start_date - timedelta(hours=trading_period)
 

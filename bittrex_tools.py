@@ -12,17 +12,17 @@ from scipy.signal import argrelextrema
 # I had a ton of trouble getting the plots to look right with the dates. I eventually figured out to use ___ type date formatting
 # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
 
+
 def process_bittrex_dict(dict):
     # This function converts the dictionaries recieved from bittrex into a
     # Dataframe formatted the same as
     # V and BV refer to volume and base volume
     df = pd.DataFrame(dict['result'])
-    df.drop(columns=["BV", "V"])
-    df = df.rename(columns={'T': "Date", 'O': 'Open',
-                            'H': 'High', 'L': 'Low', 'C': 'Close'})
+    df.drop(columns=["BV", "V", 'O', 'H', 'L'])
+    df = df.rename(columns={'T': "Date", 'C': 'Close'})
 
     # reorder the columns (defaults to alphabetic)
-    df = df[['Date', 'Open', 'High', 'Low', 'Close']]
+    df = df[['Date', 'Close']]
     df.reset_index(inplace=True, drop=True)
     # dates into datetimes
     df.Date = pd.to_datetime(df.Date, format="%Y-%m-%dT%H:%M:%S")
@@ -41,9 +41,9 @@ def original_csv_to_df(path_dict, symbol, desired_granularity, oldest):
 
     # Format according to my specifications
     df.rename(columns={'Timestamp': 'Date'}, inplace=True)
-    df.drop(columns=["Volume_(" + symbol[0:3] + ')',
+    df.drop(columns=["High", "Low", "Open", "Volume_(" + symbol[0:3] + ')',
                      'Volume_(Currency)', 'Weighted_Price'])
-    df = df[['Date', 'Open', 'High', 'Low', 'Close']]
+    df = df[['Date', 'Close']]
     df = df[df['Date'] > oldest]
     df = df[df['Close'].notnull()]  # Remove non datapoints from the set
     df.sort_values(by='Date', inplace=True)
@@ -66,7 +66,11 @@ def updated_csv_to_df(path_dict, symbol, desired_granularity, oldest):
     df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
 
     # df.drop(columns=["Symbol"])
-    df = df[['Date', 'Open', 'High', 'Low', 'Close']]
+    try:
+        df.drop(columns=['High', 'Low', 'Open'])
+    except KeyError:
+        print('Updated CSV already formatted.')
+    df = df[['Date', 'Close']]
     oldest_in_df = df.Date.min()
 
     if oldest_in_df > oldest:  # need to fetch from original
@@ -167,22 +171,23 @@ def constructLines(df):
 
     # calculate the lines
     def calcLine(data_frame):
-        #data_frame should be mins or maxs df
+        # data_frame should be mins or maxs df
         covar_limits = [10**2, 10**(-8), 10**(-8), 15**13]
-        covar = [2*i for i in covar_limits]
+        covar = [2 * i for i in covar_limits]
 
-        i = 2 #indexs for the loop
+        i = 2  # indexs for the loop
         while all([covar[idx] > covar_limits[idx] for idx in [0, 1, 2, 3]]):
-            #Keep adding points
+            print('In loop')
+            # Keep adding points
+            number_of_points = data_frame.Date.size
+            if i > number_of_points:
+                break
             try:
-                number_of_points = data_frame.Date.size
-                if  i > number_of_points:
-                    break
-
-                p, covar = curve_fit(f, mdates.date2num(mins.Date[:i]), mins.Close[:i])
+                p, covar = curve_fit(f, mdates.date2num(data_frame.Date[:i]), data_frame.Close[:i])
                 covar = np.concatenate((covar[0], covar[1]))
 
             except IndexError:
+                print(i, number_of_points)
                 i += 1
                 continue
             i += 1
@@ -213,10 +218,12 @@ def plot_market(df, strt, lines=None):
 
     if 'Account Value' in df:
         try:  # In case there are no buys or sells, only an issue while in development
-            print('HERE')
+            print(df[df.Trades != 'none'])
+            df[df.Trades == 'buy'].plot(
+                x='Date', y='Close', color='green', ax=ax, style = '.')
+            df[df.Trades == 'sell'].plot(
+                x='Date', y='Close', color='red', ax=ax, style = '.')
 
-            df[df.Trades == 'buy'].plot(x='Date', y='Close', color = 'green', ax=ax)
-            df[df.Trades == 'sell'].plot(x='Date', y='Close', color = 'red', ax=ax)
             starting_amnt = starting_info.loc[:, 'Account Value']
             starting_price = starting_info.loc[:, 'Close']
             final_amnt = df['Account Value'].iloc[-1]
@@ -263,8 +270,8 @@ def backtest(data, start, end, trdng_prd, fig=0, ax=0):
     data.sort_values(by='Date', inplace=True)
     data.reset_index(inplace=True, drop=True)
     data['Account Value'] = ''
-    data['Trades'] = ''
-    n = 24*3   # number of points to be checked before and after 24*3 is a reasonable filter
+    data['Trades'] = 'none'
+    n = 24 * 3   # number of points to be checked before and after 24*3 is a reasonable filter
     # Find local extrema and filter noise
     data['mins'] = data.iloc[argrelextrema(
         data.Close.values, np.less_equal, order=n)[0]]['Close']
@@ -272,9 +279,7 @@ def backtest(data, start, end, trdng_prd, fig=0, ax=0):
         data.Close.values, np.greater_equal, order=n)[0]]['Close']
 
     df = pd.DataFrame(columns=data.columns)
-    df['Account Value'] = money
-    df['Trades'] = float('nan')
-    coeffs, covars, lines_data  = constructLines(data)
+    coeffs, covars, lines_data = constructLines(data)
     # print('Covars are: ', covars)
     # plot_market(df, start, lines_data)
     # Bad practice to modify same object you loop over, so 'df' is used
@@ -288,51 +293,46 @@ def backtest(data, start, end, trdng_prd, fig=0, ax=0):
             continue
 
         # Filter crit points with findCriticalPoints fo flat areas are not over emphasized
-        # construct lines
-        #min then max
-        coeffs, covars, lines_data = constructLines(df[df.Date <= date])
-        # strategy_result = strategy(market, coeffs, trdng_prd)
+        # min then max
+        coeffs, covars, lines_data = constructLines(df)
+        #currently always returns the same line for both of them
         price = row.Close
 
         bot_line_val = np.polyval(coeffs[0], mdates.date2num(date))
         top_line_val = np.polyval(coeffs[1], mdates.date2num(date))
-
-        # TODO: add handling of negative ratios
-        type = float('nan')
-        high_low_rat = (top_line_val - price) / (bot_line_val - price)
+        trade = 'none'
         key_val = 0.8
-        if high_low_rat > key_val and not in_market:
-            # buy
-            money *= row.loc['Close'] * (1 - fees)
-            type = "buy"
-            in_market = True
-            print('Buy at: ', row.loc['Close'], 'on: ', date)
-        elif high_low_rat < 1 - key_val and in_market:
+
+        sell_price = key_val* (top_line_val - bot_line_val) + bot_line_val
+        buy_price =  (1 - key_val)* (top_line_val - bot_line_val) + bot_line_val
+
+        if price > sell_price and in_market:
             # sell
             money = money / row.loc['Close']
-            type = "sell"
+            trade = "sell"
             in_market = False
             print('Sell at: ', row.loc['Close'], 'on: ', date)
-        # else:
-        #     strategy_result = 'neutral'
+        elif price < buy_price and not in_market:
+            #BUY
+            money *= row.loc['Close'] * (1 - fees)
+            trade = "buy"
+            in_market = True
+            print('Buy at: ', row.loc['Close'], 'on: ', date)
 
         # Calculate account value in USD
         if in_market:
-            df.loc[i, 'Account Value'] = money / row.loc['Close']
+            df.at[i, 'Account Value'] = money / row.loc['Close']
         else:
-            df.loc[i, 'Account Value'] = money
-        df.loc[i, 'Trades'] = type
+            df.at[i, 'Account Value'] = money
+        df.at[i, 'Trades'] = trade
 
-    #previously had checked for lines_data in locals(), removed as it didnt seem to make a difference
-    plot_market(data, start, lines_data)
-
+    # previously had checked for lines_data in locals(), removed as it didnt seem to make a difference
+    plot_market(df, start, lines_data)
     account_value = df['Account Value'].iloc[-1]
     print('Account Return: ', ROI(account_value, 100))
-    market_start = df.loc[df.Date == start,'Close'].to_numpy()[0]
-    market_end = df.loc[df.Date == end,'Close'].to_numpy()[0]
+    market_start = df.loc[df.Date == start, 'Close'].to_numpy()[0]
+    market_end = df.loc[df.Date == end, 'Close'].to_numpy()[0]
     print('Market Performance: ', ROI(market_end, market_start))
-
-    # return ROI(account_value, 100), account_log
 
 
 def run():
@@ -340,5 +340,5 @@ def run():
 
 
 def ROI(final, initial):
-    #Returns the percentage increase/decrease
+    # Returns the percentage increase/decrease
     return round(final / initial - 1, 5) * 100
