@@ -13,6 +13,8 @@ from scipy.signal import argrelextrema
 # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
 
 
+#NEED A BETTER WAY TO ALTER GRANULARITY
+
 def process_bittrex_dict(dict):
     # This function converts the dictionaries recieved from bittrex into a
     # Dataframe formatted the same as
@@ -174,24 +176,21 @@ def constructLines(df):
         # data_frame should be mins or maxs df
         covar_limits = [10**2, 10**(-8), 10**(-8), 15**13]
         covar = [2 * i for i in covar_limits]
-
-        i = 2  # indexs for the loop
+        i = 2  # number of points to include
         while all([covar[idx] > covar_limits[idx] for idx in [0, 1, 2, 3]]):
-            print('In loop')
             # Keep adding points
-            number_of_points = data_frame.Date.size
-            if i > number_of_points:
+            size = data_frame.Date.size
+            if i > size:
                 break
             try:
-                p, covar = curve_fit(f, mdates.date2num(data_frame.Date[:i]), data_frame.Close[:i])
+                # This
+                p, covar = curve_fit(f, mdates.date2num(
+                    data_frame.Date[size - i:]), data_frame.Close[size - i:])
                 covar = np.concatenate((covar[0], covar[1]))
-
             except IndexError:
-                print(i, number_of_points)
                 i += 1
                 continue
             i += 1
-
         return p, covar
 
     min_p, min_cov = calcLine(mins)
@@ -205,134 +204,324 @@ def constructLines(df):
     return ps, covars, lines_data
 
 
-def plot_market(df, strt, lines=None):
+def filterCrits(df, win):
+    win = win * 24
+    f = 0.8
+    small_win = timedelta(hours=f * win)
+    large_win = timedelta(hours=win)
+    cushion = (large_win - small_win) / 2
 
-    starting_info = df[df.Date == strt]
+    # iterrate backwards in time through the df looking for crit points
+    # new df is created to help ensure that nothing is changed if df passed by reference
+    # sorted so that most recent is index 1
+    df = orig_df.sort_values(by='Date', ascending=False)
+
+    # the window is defined with 'date as the largest value in the slice, so backwards in time from date
+    # assumes a 1 hr difference between each price
+    # note: the way that this works, the indexs need to be preserved
+
+    # go until a previous is found
+    # Change this so that the object being modified is not the object being iterated over
+    for idx, date in df[df.min.notnull()].Date.iteritems():
+        # stop if the window extends past the range there is data for
+        if date - large_win < df.Date.min():
+            break
+
+        # robust enough to check acutal dates and not just index so that smaller granularities are possible
+        s_slice = df[df['Date'] <= date - cushion]
+        s_slice = s_slice[s_slice['Date'] >= date - cushion - small_win]
+        l_slice = df[df['Date'] >= date - large_win]
+        l_slice = l_slice[l_slice['Date'] <= date]
+
+        s_min_idx = s_slice.Close.idxmin()
+        s_max_idx = s_slice.Close.idxmax()
+        l_min_idx = l_slice.Close.idxmin()
+        l_max_idx = l_slice.Close.idxmax()
+
+        if s_min_idx == l_min_idx and df.loc[s_min_idx, 'Critical'] == '':
+            df.loc[s_min_idx, 'min'] = df.loc[s_min_idx, 'Close']
+            mins_num += 1
+
+        if s_max_idx == l_max_idx and df.loc[s_max_idx, 'Critical'] == '':
+            df.loc[s_max_idx, 'max'] = df.loc[s_max_idx, 'Close']
+            maxs_num += 1
+
+        if mins_num >= points_to_find and maxs_num >= points_to_find:
+            break
+
+    # in some places, the critical points are unclear. In those places, the data is usually
+    # roughly linear and a solution can be found by refering to a larger scale
+    # Construct top and bottom lines
+
+    return df.sort_values(by='Date')
+
+
+def plot_market(df, strt, roi=0, market_performance=0, lines=None):
 
     # Create the figure
     fig, ax = plt.subplots()
-    x_text = df.loc[0, 'Date']
-    y_text = df['Close'].max()
 
     df.plot(x='Date', y='Close', ax=ax)
 
     if 'Account Value' in df:
-        try:  # In case there are no buys or sells, only an issue while in development
-            print(df[df.Trades != 'none'])
-            df[df.Trades == 'buy'].plot(
-                x='Date', y='Close', color='green', ax=ax, style = '.')
-            df[df.Trades == 'sell'].plot(
-                x='Date', y='Close', color='red', ax=ax, style = '.')
+        # Plot the critical points if any
+        df[df.mins.notnull()].plot(x='Date', y='Close',
+                                   ax=ax, color='orange', style='.')
+        df[df.maxs.notnull()].plot(x='Date', y='Close',
+                                   ax=ax, color='orange', style='.')
+        df[df.Trades == 'Buy'].plot(
+            x='Date', y='Close', color='green', ax=ax, style='.', marker='o')
+        df[df.Trades == 'Sell'].plot(
+            x='Date', y='Close', color='red', ax=ax, style='.', marker='o')
 
-            starting_amnt = starting_info.loc[:, 'Account Value']
-            starting_price = starting_info.loc[:, 'Close']
-            final_amnt = df['Account Value'].iloc[-1]
-            strat_return = ROI(final_amnt, starting_amnt)
-            market_performance = ROI(starting_price, df.Close.iloc[-1])
-            ax.text(x_text, y_text, 'ROI = {} %, Market Performance = {} %'.format(
-                strat_return, market_performance))
-        except TypeError:
-            print('Error plotting Trades column')
+        x_text = df.loc[0, 'Date']
+        y_text = df['Close'].max()
+        ax.text(x_text, y_text, 'ROI = {} %, Market Performance = {} %'.format(
+            roi, market_performance))
+        # print('Error plotting Trades column')
+        # print('Zero Division Error calculating return')
         # Plot lines if any
         if lines is not None:
             lines.plot(x='Date', y='mins', ax=ax)
             lines.plot(x='Date', y='maxs', ax=ax)
 
-        # Plot the critical points if any
-        try:
-            df[df.mins.notnull()].plot(x='Date', y='Close',
-                                       ax=ax, color='orange', style='.')
-            df[df.maxs.notnull()].plot(x='Date', y='Close',
-                                       ax=ax, color='orange', style='.')
-
-        except TypeError:
-            print("Type error plotting critical")
-        except AttributeError:
-            print('Attribute error plotting critical')
-
+        # except TypeError:
+        #     print("Type error plotting critical")
+        # except AttributeError:
+        #     print('Attribute error plotting critical')
+    df.plot(x='Date', y='Account Value', ax=ax)
+    bot, top = plt.ylim()
+    plt.ylim(0, top)
     fig.autofmt_xdate()
     plt.show()
-    return fig, ax
+
+    plt.figure()
 
 
-def backtest(data, start, end, trdng_prd, fig=0, ax=0):
+def test_trade(money, in_market, trade, price, date, fees):
+    if in_market == False:
+        money = (money / price) * (1 - fees)
+        trade = "Buy"
+        print('Buy  at: ', round(price,1), 'on: ', date)
+    else:
+        money *= price
+        trade = "Sell"
+        print('Sell at: ', round(price,1), 'on: ', date)
+
+    in_market = not in_market
+    return money, in_market, trade
+
+
+def strategy(df, date, price, last_min_num, last_max_num):
+    # probably dont have to pass price, can calculate based on given date
+    # Check that there are enough crit points to calculate, new loop if not (this is for initial cases)
+    mins_num = df[df.mins.notnull()].Date.size
+    maxs_num = df[df.maxs.notnull()].Date.size
+    if maxs_num < 2 or mins_num < 2:
+        last_min_num = mins_num
+        last_max_num = maxs_num
+        return 'insufficient data'
+        end()
+
+        # LOOK ABOVE
+
+    elif mins_num != last_min_num or maxs_num != last_max_num:
+        # Calculate the lines if there are new values
+        coeffs, covars, lines_data = constructLines(df)  # min then max
+        last_max_num = maxs_num
+        last_min_num = mins_num
+
+    # Filter crit points with findCriticalPoints fo flat areas are not over emphasized
+
+    bot_line_val = np.polyval(coeffs[0], mdates.date2num(date))
+    top_line_val = np.polyval(coeffs[1], mdates.date2num(date))
+    key_val = 0.9
+
+    sell_price = key_val * (top_line_val - bot_line_val) + bot_line_val
+    buy_price = (1 - key_val) * (top_line_val -
+                                 bot_line_val) + bot_line_val
+    min_slope = coeffs[0][0]
+    max_slope = coeffs[1][0]
+
+    signal = 'neutral'
+
+    if min_slope > max_slope:
+
+        cushion = .05  # percentage
+        # TODO account for if the lines have fully crossed
+        local_sell_price = bot_line_val - \
+            cushion * (top_line_val - bot_line_val)
+        local_buy_price = bot_line_val + \
+            (1 + cushion) * (top_line_val - bot_line_val)
+        if price > local_buy_price:
+            signal = 'bullish'
+        elif price < local_sell_price:
+            signal = 'bearish'
+
+    elif price > sell_price:
+        # Normal sell
+        signal = 'bearish'
+    elif price < buy_price:
+        # Normal
+        signal = 'bullish'
+    return signal
+
+
+def backtest(data, start, end, extrema_filter, experiment=False, fig=0, ax=0):
     # TODO throw an error here if end > start
-    #trdng_prd in days
 
     in_market = False
     money = 100
     fees = 0.003  # standard fees are 0.3% per transaction
 
     # Ensure that only the necessary dates are in the df
-    data = data[data['Date'] >= start - timedelta(hours=trdng_prd)]
+    data = data[data['Date'] >= start - timedelta(hours=extrema_filter)]
     data = data[data['Date'] <= end]
     data.drop_duplicates()
     data.sort_values(by='Date', inplace=True)
     data.reset_index(inplace=True, drop=True)
-    data['Account Value'] = ''
-    data['Trades'] = 'none'
-    n = 24 * 3   # number of points to be checked before and after 24*3 is a reasonable filter
+    data['Account Value'] = 0
+    data['Trades'] = ''
+    # TODO this should be moved into the loop
+    # n = 24 * 7   # number of points to be checked before and after 24*3 is a reasonable filter
     # Find local extrema and filter noise
     data['mins'] = data.iloc[argrelextrema(
-        data.Close.values, np.less_equal, order=n)[0]]['Close']
+        data.Close.values, np.less_equal, order=extrema_filter)[0]]['Close']
     data['maxs'] = data.iloc[argrelextrema(
-        data.Close.values, np.greater_equal, order=n)[0]]['Close']
+        data.Close.values, np.greater_equal, order=extrema_filter)[0]]['Close']
 
     df = pd.DataFrame(columns=data.columns)
-    coeffs, covars, lines_data = constructLines(data)
-    # print('Covars are: ', covars)
-    # plot_market(df, start, lines_data)
     # Bad practice to modify same object you loop over, so 'df' is used
-    for i, row in data.iterrows():
+    last_min_num = 0
+    last_max_num = 0
+    first_check = True
+
+    for i, row in data[data.Date >= start].iterrows():
+        if first_check:
+            market_start = row.Close
+            first_check = False
+
         df = df.append(row)
         date = row.Date
-        # Check that there are enough crit points to calculate, new loop if not
-        maxs_num = df[df.mins.notnull()].Date.count()
-        mins_num = df[df.maxs.notnull()].Date.count()
-        if maxs_num < 2 or mins_num < 2:
-            continue
-
-        # Filter crit points with findCriticalPoints fo flat areas are not over emphasized
-        # min then max
-        coeffs, covars, lines_data = constructLines(df)
-        #currently always returns the same line for both of them
         price = row.Close
 
-        bot_line_val = np.polyval(coeffs[0], mdates.date2num(date))
-        top_line_val = np.polyval(coeffs[1], mdates.date2num(date))
-        trade = 'none'
-        key_val = 0.8
+        trade = ''
 
-        sell_price = key_val* (top_line_val - bot_line_val) + bot_line_val
-        buy_price =  (1 - key_val)* (top_line_val - bot_line_val) + bot_line_val
+        signal = strategy(df, date, price, last_min_num, last_max_num)
 
-        if price > sell_price and in_market:
-            # sell
-            money = money / row.loc['Close']
-            trade = "sell"
-            in_market = False
-            print('Sell at: ', row.loc['Close'], 'on: ', date)
-        elif price < buy_price and not in_market:
-            #BUY
-            money *= row.loc['Close'] * (1 - fees)
-            trade = "buy"
-            in_market = True
-            print('Buy at: ', row.loc['Close'], 'on: ', date)
-
+        # Trade based on signal
+        if signal == 'bullish' and not in_market:
+            [money, in_market, trade] = test_trade(
+                money, in_market, trade, price, date, fees)
+        elif signal == 'bearish' and in_market:
+            [money, in_market, trade] = test_trade(
+                money, in_market, trade, price, date, fees)
         # Calculate account value in USD
         if in_market:
-            df.at[i, 'Account Value'] = money / row.loc['Close']
+            account_value =  money * row.loc['Close']
         else:
-            df.at[i, 'Account Value'] = money
+            account_value = money
+
+        df.at[i, 'Account Value'] = account_value
         df.at[i, 'Trades'] = trade
 
-    # previously had checked for lines_data in locals(), removed as it didnt seem to make a difference
-    plot_market(df, start, lines_data)
-    account_value = df['Account Value'].iloc[-1]
-    print('Account Return: ', ROI(account_value, 100))
-    market_start = df.loc[df.Date == start, 'Close'].to_numpy()[0]
+    # This allows for accessing by index
+
+    roi = ROI(account_value, 100)
+    print('Account Return: ', roi, ' %')
     market_end = df.loc[df.Date == end, 'Close'].to_numpy()[0]
-    print('Market Performance: ', ROI(market_end, market_start))
+    market_performance = ROI(market_end, market_start)
+    print('Market Performance: ', market_performance, ' %')
+    if experiment == False:
+        try:
+            plot_market(df, start, roi, market_performance)
+        except UnboundLocalError:
+            plot_market(df, start)
+    return roi
+
+
+def testRun(data, extrema_filter,):
+    #maybe it would be helpful to run this through command line argv etc
+
+    in_market = False
+    money = 100
+    fees = 0.003  # standard fees are 0.3% per transaction
+
+    # Ensure that only the necessary dates are in the df
+    data = data[data['Date'] >= start - timedelta(hours=extrema_filter)]
+    data = data[data['Date'] <= end]
+    data.drop_duplicates()
+    data.sort_values(by='Date', inplace=True)
+    data.reset_index(inplace=True, drop=True)
+    data['Account Value'] = 0
+    data['Trades'] = ''
+
+    # Find local extrema and filter noise, for now this is done everytime but eventually should be more efficient
+    data['mins'] = data.iloc[argrelextrema(
+        data.Close.values, np.less_equal, order=extrema_filter)[0]]['Close']
+    data['maxs'] = data.iloc[argrelextrema(
+        data.Close.values, np.greater_equal, order=extrema_filter)[0]]['Close']
+
+    df = pd.DataFrame(columns=data.columns)
+    # Bad practice to modify same object you loop over, so 'df' is used
+    last_min_num = 0
+    last_max_num = 0
+    first_check = True
+
+
+    while True:
+
+
+        candle_dict = my_bittrex.get_candles('USD-BTC', 'hour')
+        if candle_dict['success']:
+            new_data = process_bittrex_dict(candle_dict)
+        else:
+            print("Failed to get candle data")
+
+        data = data.append(new_data)
+        data = data.drop_duplicates(['Date'])
+        data = data.sort_values(by='Date')
+        data.reset_index(inplace=True, drop=True)
+
+        if first_check:
+            market_start = row.Close
+            first_check = False
+
+        df = df.append(row)
+        date = row.Date
+        price = row.Close
+
+        trade = ''
+
+        signal = strategy(df, date, price, last_min_num, last_max_num)
+
+        # Trade based on signal
+        if signal == 'bullish' and not in_market:
+            [money, in_market, trade] = test_trade(
+                money, in_market, trade, price, date, fees)
+        elif signal == 'bearish' and in_market:
+            [money, in_market, trade] = test_trade(
+                money, in_market, trade, price, date, fees)
+        # Calculate account value in USD
+        if in_market:
+            account_value =  money * row.loc['Close']
+        else:
+            account_value = money
+
+        df.at[i, 'Account Value'] = account_value
+        df.at[i, 'Trades'] = trade
+
+        # This allows for accessing by index
+        df.reset_index(inplace=True, drop=True)
+
+        roi = ROI(account_value, 100)
+        print('Account Return: ', roi, ' %')
+        market_end = df.loc[df.Date == end, 'Close'].to_numpy()[0]
+        market_performance = ROI(market_end, market_start)
+        print('Market Performance: ', market_performance, ' %')
+
+
+        time.sleep(60*60) #in seconds. wait an hour
 
 
 def run():
@@ -341,4 +530,4 @@ def run():
 
 def ROI(final, initial):
     # Returns the percentage increase/decrease
-    return round(final / initial - 1, 5) * 100
+    return round(final / initial - 1, 2) * 100
