@@ -30,10 +30,6 @@ if candle_dict['success']:
 else:
     print("Failed to get candle data")
 
-df = df.append(new_data)
-df = df.sort_values(by='Date')
-df = df.drop_duplicates(['Date'])
-df.reset_index(inplace=True, drop=True)
 # overwrite_csv_file(updated_path, df)
 
 fig, ax = plt.subplots()
