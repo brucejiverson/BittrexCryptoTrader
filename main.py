@@ -48,7 +48,8 @@ print('Historical data has been fetched from CSV.')
 
 overwrite_csv_file(paths, data)
 
-roi = backtest(data, start_date, end_date, extrema_filter)
+
+# roi = backtest(data, start_date, end_date, extrema_filter)
 def experiment():
     df = pd.DataFrame(columns = ['ROI', 'n'])
     i = 0
