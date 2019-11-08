@@ -9,11 +9,15 @@ import numpy as np
 from scipy.optimize import curve_fit
 from scipy.signal import argrelextrema
 import statistics as stat
+import os
 
 
-# I had a ton of trouble getting the plots to look right with the dates. I eventually figured out to use ___ type date formatting
+# I had a ton of trouble getting the plots to look right with the dates.
 # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
 
+def maybe_make_dir(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
 # NEED A BETTER WAY TO ALTER GRANULARITY
 def get_candles(bittrex_obj, df, market, granularity):
@@ -49,7 +53,7 @@ def original_csv_to_df(path_dict, desired_granularity, oldest, end):
     print('Fetching historical data from download CSV.')
 
     # get the historic data
-    path = path_dict['Download']
+    path = path_dict['downloaded history']
 
     def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
     df = pd.read_csv(path, usecols=['Timestamp', 'Close'], parse_dates=[
@@ -82,7 +86,7 @@ def fetchHistoricalData(path_dict, market, desired_granularity, start_date, end_
     print('Fetching historical data from updated CSV.')
 
     # get the historic data
-    path = path_dict['Updated']
+    path = path_dict['updated history']
 
     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
     df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
@@ -107,11 +111,11 @@ def fetchHistoricalData(path_dict, market, desired_granularity, start_date, end_
     df = df[df['Date'] <= end_date]
     df.sort_values(by='Date', inplace=True)
     df.reset_index(inplace=True, drop=True)
+    print(df.head())
+    return df.values
 
-    return df
 
-
-def overwrite_csv_file(path_dict, df):
+def overwrite_csv_file(path_dict, array):
     # This function writes the information in the original format to the csv file
     # including new datapoints that have been fetched
 
@@ -120,6 +124,8 @@ def overwrite_csv_file(path_dict, df):
     path = path_dict['Updated']
     # must create new df as df is passed by reference
     # datetimes to strings
+    df = pd.DataFrame({'Date': array[:, 0], 'Close': np.float_(array[:, 1])})
+    print(df.head())
     df['Date'] = df['Date'].dt.strftime("%Y-%m-%d %I-%p")
     df.to_csv(path)
     df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p")
@@ -138,89 +144,9 @@ def update_trade_log(path, data):
     print('The trade log has been updated')
 
 
-def constructLines(df):
-    maxs = df[df.maxs.notnull()]
-    mins = df[df.mins.notnull()]
-
-    # function to fit
-    def f(x, m, b):
-        return m * x + b
-
-    # calculate the lines
-    def calcLine(data_frame):
-        # data_frame should be mins or maxs df
-        covar_limits = [10**2, 10**(-8), 10**(-8), 15**13] #minimum limits
-        covar = [2 * i for i in covar_limits] #initialize this list as greater than cover_limits
-        i = 2  # number of points to include
-        while all([covar[idx] > covar_limits[idx] for idx in [0, 1, 2, 3]]):
-            # Keep adding points
-            size = data_frame.Date.size
-            if i > size: #break loop if exceeding the size of the df
-                break
-            try:
-                # This
-                p, covar = curve_fit(f, mdates.date2num(
-                    data_frame.Date[size - i:]), data_frame.Close[size - i:])
-                covar = np.concatenate((covar[0], covar[1])) #join the covar list together into a un nested array
-            except IndexError:
-                i += 1
-                continue
-            i += 1
-        return p, covar
-
-    min_p, min_cov = calcLine(mins)
-    max_p, max_cov = calcLine(maxs)
-
-    lines_data = pd.DataFrame(data={'Date': df.Date})
-    lines_data['mins'] = f(mdates.date2num(df.Date), *min_p)
-    lines_data['maxs'] = f(mdates.date2num(df.Date), *max_p)
-    ps = [min_p, max_p]
-    covars = [min_cov, max_cov]
-    return ps, covars, lines_data
-
-
-def filterCrits(orig_df):
-    df = orig_df #need
-    #Making this quick and dirty for now
-    #ordered dict may be better?
-    #index then value
-
-    def line(x, m, b): # function to fit
-        return m * x + b
-
-    #going down: current, last, 2 last
-    my_mins = {'Indexs':[-1, -1, -1], 'Date': [float('nan'), float('nan'), float('nan')], 'Values': [0, 0, 0]}
-    mins_df = pd.DataFrame.from_dict(my_mins)
-    maxs_df = mins_df
-
-    for idx, row in orig_df.iterrows():
-
-        if not math.isnan(row.mins):
-            #Note: index is preserved with these operations
-            mins_df.at[2] = mins_df.iloc[1]
-            mins_df.at[1] = mins_df.iloc[0]
-            mins_df.loc[0, 'Indexs'] = idx
-            mins_df.loc[0, 'Values'] = row.mins
-            mins_df.loc[0, 'Date'] = row.Date
-
-        else:
-            continue
-        if all([x != 0 for x in mins_df['Values']]): #have found at least three mins
-            print(mins_df)
-            p, covar = curve_fit(line, mdates.date2num(mins_df.Date), mins_df.Values)
-            value =  line(mdates.date2num(mins_df.loc[1, 'Date']), *p)
-
-            if value > mins_df.loc[0, 'Values'] and value > mins_df.loc[2, 'Values']:
-                orig_df.at[mins_df.loc[1, 'Indexs'], 'mins'] = float('nan')
-                print('Filtered min',mins_df.loc[1, 'Date'])
-
-        # if all([x != 0 for x[1] in my_maxs.values()]): #have found at least two maxs
-        #         if my_maxs['current'][1] < my_maxs['last1'][1] and my_maxs['current'][1] < my_maxs['last2'][1]:
-        #             df.at[my_maxs['last1'][0], 'maxs'] = float('nan')
-
-    return orig_df
-
-
+# need a plot training results
+# plot testing results
+# plot running results
 def plot_market(df, strt, roi=0, market_performance=0, lines=None):
     # Create the figure
     fig, ax = plt.subplots()
@@ -244,7 +170,7 @@ def plot_market(df, strt, roi=0, market_performance=0, lines=None):
                 x='Date', y='Close', color='red', ax=ax, style='.', marker='o')
         except TypeError:
             print("No sells.")
-        plt.axvline(x = strt)
+        plt.axvline(x=strt)
         x_text = df.loc[0, 'Date']
         y_text = df['Close'].max()
         ax.text(x_text, y_text, 'ROI = {} %, Market Performance = {} %'.format(
@@ -266,117 +192,273 @@ def plot_market(df, strt, roi=0, market_performance=0, lines=None):
     fig.autofmt_xdate()
     plt.show()
 
+def get_scaler(env):
+    # return scikit-learn scaler object to scale the states
+    # Note: you could also populate the replay buffer here
 
-def test_trade(money, in_market, trade, price, date, fees, sig_reason):
-    if in_market == False:
-        money = (money / price) * (1 - fees)
-        trade = "Buy"
-        print('Buy  at: ', round(price, 1), 'on: ', date, sig_reason)
-    else:
-        money *= price
-        trade = "Sell"
-        print('Sell at: ', round(price, 1), 'on: ', date, sig_reason)
+    states = []
+    for _ in range(env.n_step):
+        action = np.random.choice(env.action_space)
+        state, reward, done, info = env.step(action)
+        states.append(state)
+        if done:
+            break
 
-    in_market = not in_market
-    return money, in_market, trade
-
-
-def strategy(df, date, price, last_min_num, last_max_num):
-    # probably dont have to pass price, can calculate based on given date
-    # Check that there are enough crit points to calculate, new loop if not (this is for initial cases)
-    mins_num = df[df.mins.notnull()].Date.size
-    maxs_num = df[df.maxs.notnull()].Date.size
-    if maxs_num < 2 or mins_num < 2:
-        last_min_num = mins_num
-        last_max_num = maxs_num
-        return 'insufficient data', 'none', last_max_num, last_min_num
-        end()
+    scaler = StandardScaler()
+    scaler.fit(states)
+    return scaler
 
 
-    elif mins_num == last_min_num and maxs_num == last_max_num:
-        return 'no new data', 'none', last_max_num, last_min_num
-        end()
+class LinearModel:
+    """ A linear regression model """
 
-    # Calculate the lines if there are new values
-    coeffs, covars, lines_data = constructLines(df)  # min then max
-    last_max_num = maxs_num
-    last_min_num = mins_num
+    def __init__(self, input_dim, n_action):
+        self.W = np.random.randn(input_dim, n_action) / np.sqrt(input_dim)
+        self.b = np.zeros(n_action)
 
-    # Filter crit points with findCriticalPoints fo flat areas are not over emphasized
+        # momentum terms
+        self.vW = 0
+        self.vb = 0
 
-    bot_line_val = np.polyval(coeffs[0], mdates.date2num(date))
-    top_line_val = np.polyval(coeffs[1], mdates.date2num(date))
-    key_val = 0.8
+        self.losses = []
 
-    sell_price = bot_line_val + key_val * (top_line_val - bot_line_val)
-    buy_price = bot_line_val + (1 - key_val) * (top_line_val -
-                                 bot_line_val)
-    min_slope = coeffs[0][0]
-    max_slope = coeffs[1][0]
+    def predict(self, X):
+        # make sure X is N x D
+        assert(len(X.shape) == 2)
+        return X.dot(self.W) + self.b
 
-    signal = 'neutral'
-    slope_lim = 35
-    mean_slope = stat.mean([max_slope, min_slope])
+    def sgd(self, X, Y, learning_rate=0.01, momentum=0.9):
+        # make sure X is N x D
+        assert(len(X.shape) == 2)
 
-    signal_reason = 'normal'
-    # Place below so that subseque  ntasdfterms supercede/overwrite
-    #Mixed signals are occuring, buys are closing and sells are normal
+        # the loss values are 2-D
+        # normally we would divide by N only
+        # but now we divide by N x K
+        num_values = np.prod(Y.shape)
 
-    # Normal buy and sell
-    if price > sell_price:
-        # Normal sell
-        signal = 'bearish'
-    elif price < buy_price:
-        # Normal buy
-        signal = 'bullish'
+        # do one step of gradient descent
+        # we multiply by 2 to get the exact gradient
+        # (not adjusting the learning rate)
+        # i.e. d/dx (x^2) --> 2x
+        Yhat = self.predict(X)
+        gW = 2 * X.T.dot(Yhat - Y) / num_values
+        gb = 2 * (Yhat - Y).sum(axis=0) / num_values
 
-    # if min_slope > max_slope + 5:
-    #     #How is this different than normal?
-    #     cushion = .05  # percentage
-    #     # TODO account for if the lines have fully crossed
-    #     local_sell_price = bot_line_val - \
-    #         cushion * (top_line_val - bot_line_val)
-    #     local_buy_price = bot_line_val + \
-    #         (1 + cushion) * (top_line_val - bot_line_val)
-    #     if price > local_buy_price:
-    #         signal = 'bullish'
-    #         signal_reason = 'closing triangle'
-    #
-    #     elif price < local_sell_price:
-    #         signal = 'bearish'
-    #         signal_reason = 'closing triangle'
+        # update momentum terms
+        self.vW = momentum * self.vW - learning_rate * gW
+        self.vb = momentum * self.vb - learning_rate * gb
 
-    if bot_line_val > top_line_val - 0.02*(top_line_val -bot_line_val) :
+        # update params
+        self.W += self.vW
+        self.b += self.vb
 
-        signal = 'neutral'
-        signal_reason = 'lines are really close!'
+        mse = np.mean((Yhat - Y)**2)
+        self.losses.append(mse)
 
-    #If slope_lim is dominating, the local prices are to detect trend reversal
-    #cant make this larger than the lines cause new crit points would be added
-    slope_lim_key = .05
-    local_sell_price = bot_line_val + slope_lim_key  * (top_line_val -
-                                 bot_line_val)
-    local_buy_price = bot_line_val + (1 + key_val) * (top_line_val - bot_line_val)
+    def load_weights(self, filepath):
+        npz = np.load(filepath)
+        self.W = npz['W']
+        self.b = npz['b']
 
-    if mean_slope > slope_lim:
+    def save_weights(self, filepath):
+        np.savez(filepath, W=self.W, b=self.b)
 
-        # if price < local_sell_price:
-        #     signal_reason = 'slope_lim trend reversal'
-        #     signal = 'bearish'
-        # else:
-        #     signal_reason = 'slope_lim'
-        #     signal = 'bullish'
-      signal_reason = 'slope_lim'
-      signal = 'bullish'
-    elif mean_slope < -slope_lim:
-        # if price > local_buy_price:
-        #     signal_reason = 'slope_lim trend reversal'
-        #     signal = 'bullish'
-        # else:
-        signal_reason = 'slope_lim'
-        signal = 'bearish'
 
-    return signal, signal_reason, last_max_num, last_min_num
+class MarketEnv:
+    """
+    A multi-asset trading environment.
+    For now this has been adopted for only one asset.
+    Below shows how to add more.
+
+    State: vector of size 7 (n_stock * 2 + 1)
+      - # shares of stock 1 owned
+      - # shares of stock 2 owned
+      - # shares of stock 3 owned
+      - price of stock 1 (using daily close price)
+      - price of stock 2
+      - price of stock 3
+      - cash owned (can be used to purchase more stocks)
+
+    Action: categorical variable with 27 (3^3) possibilities
+      - for each stock, you can:
+      - 0 = sell
+      - 1 = hold
+      - 2 = buy
+    """
+
+    def __init__(self, data, initial_investment=20000):
+        # data
+        self.asset_price_history = data
+        self.n_step, self.n_stock = self.asset_price_history.shape
+
+        # instance attributes
+        self.initial_investment = initial_investment
+        self.cur_step = None
+        self.asset_owned = None
+        self.asset_price = None
+        self.cash_in_hand = None
+
+        self.action_space = np.arange(3**self.n_stock)
+
+        # action permutations
+        # returns a nested list with elements like:
+        # [0,0,0]
+        # [0,0,1]
+        # [0,0,2]
+        # [0,1,0]
+        # [0,1,1]
+        # etc.
+        # 0 = sell
+        # 1 = hold
+        # 2 = buy
+        self.action_list = list(
+            map(list, itertools.product([0, 1, 2], repeat=self.n_stock)))
+
+        # calculate size of state
+        self.state_dim = self.n_stock * 2 + 1
+
+        self.reset()
+
+    def reset(self):
+        #Resets the environement to the initial state
+        self.cur_step = 0
+        self.asset_owned = np.zeros(self.n_stock)
+        self.asset_price = self.asset_price_history[self.cur_step]
+        self.cash_in_hand = self.initial_investment
+        return self._get_obs()
+
+    def step(self, action):
+        assert action in self.action_space
+
+        # get current value before performing the action
+        prev_val = self._get_val()
+
+        # update price, i.e. go to the next day
+        self.cur_step += 1
+        self.asset_price = self.asset_price_history[self.cur_step]
+
+        # perform the trade
+        self._test_trade(action)
+
+        # get the new value after taking the action
+        cur_val = self._get_val()
+
+        # reward is the increase in porfolio value
+        reward = cur_val - prev_val
+
+        # done if we have run out of data
+        done = self.cur_step == self.n_step - 1
+
+        # store the current value of the portfolio here
+        info = {'cur_val': cur_val}
+
+        # conform to the Gym API
+        return self._get_obs(), reward, done, info
+
+    def _get_obs(self):
+        obs = np.empty(self.state_dim)
+        obs[:self.n_stock] = self.asset_owned
+        obs[self.n_stock:2 * self.n_stock] = self.asset_price
+        obs[-1] = self.cash_in_hand
+        return obs
+
+    def _get_val(self):
+        return self.asset_owned.dot(self.asset_price) + self.cash_in_hand
+
+    def _test_trade(self, action):
+        # index the action we want to perform
+        # 0 = sell
+        # 1 = hold
+        # 2 = buy
+        # e.g. [2,1,0] means:
+        # buy first stock
+        # hold second stock
+        # sell third stock
+        action_vec = self.action_list[action]
+
+        # determine which stocks to buy or sell
+        sell_index = []  # stores index of stocks we want to sell
+        buy_index = []  # stores index of stocks we want to buy
+        for i, a in enumerate(action_vec):
+            if a == 0:
+                sell_index.append(i)
+            elif a == 2:
+                buy_index.append(i)
+
+        # sell any stocks we want to sell
+        # then buy any stocks we want to buy
+        if sell_index:
+            # NOTE: to simplify the problem, when we sell, we will sell ALL shares of that stock
+            for i in sell_index:
+                self.cash_in_hand += self.asset_price[i] * self.asset_owned[i]
+                self.asset_owned[i] = 0
+        if buy_index:
+            # NOTE: when buying, we will loop through each stock we want to buy,
+            #       and buy one share at a time until we run out of cash
+            can_buy = True
+            while can_buy:
+                for i in buy_index:
+                    if self.cash_in_hand > self.asset_price[i]:
+                        self.asset_owned[i] += 1  # buy one share
+                        self.cash_in_hand -= self.asset_price[i]
+                    else:
+                        can_buy = False
+
+
+class DQNAgent(object):
+    def __init__(self, state_size, action_size):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.gamma = 0.95  # discount rate
+        self.epsilon = 1.0  # exploration rate
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+        self.model = LinearModel(state_size, action_size)
+
+    def act(self, state):
+        if np.random.rand() <= self.epsilon:
+            return np.random.choice(self.action_size)
+        act_values = self.model.predict(state)
+        return np.argmax(act_values[0])  # returns action
+
+    def train(self, state, action, reward, next_state, done):
+        if done:
+            target = reward
+        else:
+            target = reward + self.gamma * \
+                np.amax(self.model.predict(next_state), axis=1)
+
+        target_full = self.model.predict(state)
+        target_full[0, action] = target
+
+        # Run one training step
+        self.model.sgd(state, target_full)
+
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+
+    def load(self, name):
+        self.model.load_weights(name)
+
+    def save(self, name):
+        self.model.save_weights(name)
+
+
+def play_one_episode(agent, env, is_train):
+    # note: after transforming states are already 1xD
+    state = env.reset()
+    state = scaler.transform([state])
+    done = False
+
+    while not done:
+        action = agent.act(state)
+        next_state, reward, done, info = env.step(action)
+        next_state = scaler.transform([next_state])
+        if is_train == 'train':
+            agent.train(state, action, reward, next_state, done)
+        state = next_state
+
+    return info['cur_val']
 
 
 def backtest(data, start, end, extrema_filter, experiment=False, fig=0, ax=0):
@@ -406,7 +488,7 @@ def backtest(data, start, end, extrema_filter, experiment=False, fig=0, ax=0):
         if date < start:
             continue
         elif date >= start and market_start == 0:
-           market_start = price
+            market_start = price
 
         # Find local extrema and filter noise
         df['mins'] = df.iloc[argrelextrema(
@@ -436,7 +518,7 @@ def backtest(data, start, end, extrema_filter, experiment=False, fig=0, ax=0):
         df.at[i, 'Account Value'] = account_value
         df.at[i, 'Trades'] = trade
 
-    #Note: can access by index
+    # Note: can access by index
     roi = ROI(account_value, init_money)
     print('Account Return: ', roi, ' %')
 
@@ -456,29 +538,15 @@ def backtest(data, start, end, extrema_filter, experiment=False, fig=0, ax=0):
     return roi
 
 
-def testRun(df, bittrex_obj, extrema_filter, path_dict):
+def run_agent(mode, df, bittrex_obj, extrema_filter, path_dict):
     # maybe it would be helpful to run this through command line argv etc
 
-    # every hour
-        # check if it should buy or not
-        # execute Trade if ...
-        # update the trade log
-        # drop the old and unnecessary datapoints
-
-    in_market = False
     account_info = bittrex_obj.get_balance('BTC')
     money = account_info['result']['Balance']
     fees = 0.0025  # standard fees are 0.3% per transaction
 
-    df['Account Value'] = 0
-    df['Trades'] = ''
-
-    last_min_num = 0
-    last_max_num = 0
-    first_check = True
-
     while True:
-
+        #Fetch new data
         candle_dict = bittrex_obj.get_candles('USD-BTC', 'hour')
         if candle_dict['success']:
             new_data = process_bittrex_dict(candle_dict)
@@ -498,7 +566,6 @@ def testRun(df, bittrex_obj, extrema_filter, path_dict):
             data.Close.values, np.greater_equal, order=extrema_filter)[0]]['Close']
         # data = filterCrits(data)
 
-
         if first_check:
             market_start = price
             first_check = False
@@ -516,12 +583,6 @@ def testRun(df, bittrex_obj, extrema_filter, path_dict):
         # Used to place a buy order in a specific market. Use buylimit to place
         # limit orders Make sure you have the proper permissions set on your
         # API keys for this call to work
-
-
-
-
-
-
 
         signal = strategy(df, date, price, last_min_num, last_max_num)
 
@@ -551,10 +612,6 @@ def testRun(df, bittrex_obj, extrema_filter, path_dict):
         print('Market Performance: ', market_performance, ' %')
 
         time.sleep(60 * 60)  # in seconds. wait an hour
-
-
-def run():
-    pass
 
 
 def ROI(final, initial):
