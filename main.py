@@ -68,6 +68,7 @@ print('Historical data has been fetched, updated, and resaved.')
 
 
 run_agent(mode, df.drop('Date', axis = 1).values, my_bittrex, paths) #note: only passing through numpy array not df
+
 plot_history(df)
 
 
