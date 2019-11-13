@@ -42,24 +42,27 @@ def process_bittrex_dict(candle_dictionary):
 
 
 def get_candles(bittrex_obj, df, market, granularity):
-    print('Fetching candles from Bittrex')
-    candle_dict = bittrex_obj.get_candles(
-        market, 'oneMin')
-    if candle_dict['success']:
-        new_df = process_bittrex_dict(candle_dict)
-        print("Success getting candle data")
+    #Tested with 'oneMin', and it returned exactly 10 days worth of data (14400 entries)
 
-    else:
-        print("Failed to get candle data")
+    attempts = 0
+    while True:
+        print('Fetching candles from Bittrex.')
+        candle_dict = bittrex_obj.get_candles(
+            market, 'oneMin')
 
-    df = df.append(new_df)
-    df = df.drop_duplicates(['Date'])
-    df = df.sort_values(by='Date')
-    df.reset_index(inplace=True, drop=True)
+        if candle_dict['success']:
+            df = process_bittrex_dict(candle_dict)
+            print("Success getting candle data.")
+            break
+        else:
+            print("Failed to get candle data.")
+            time.sleep(1)
+            print('Retrying...')
+
     return df
 
 
-def original_csv_to_df(path_dict, earliest, end):
+def original_csv_to_df(path_dict):
 
     print('Fetching historical data from download CSV.')
 
@@ -71,37 +74,13 @@ def original_csv_to_df(path_dict, earliest, end):
                      'Timestamp'], date_parser=dateparse)
     df.rename(columns={'Timestamp': 'Date'}, inplace=True)
 
-    # cryptodatadownload def dateparse(x): return pd.datetime.strptime(x, '%Y-%m-%d %I-%p')
+    # cryptodatadownload def dateparse(x): return pd.datetime.strptime(x, '%Y-%m-%d %I-%p-%M')
     # df = pd.read_csv(path, header = 1, usecols = ['Date', 'Close'], parse_dates=['Date'], date_parser=dateparse)
 
-    # Format according to my specifications
-
-    df = df[['Date', 'Close']]
-    df = df[df['Date'] >= earliest]
-    df = df[df['Date'] <= end]
-
-    df = df[df['Close'].notnull()]  # Remove non datapoints from the set
-    df.sort_values(by='Date', inplace=True)
-    df.reset_index(inplace=True, drop=True)
-
-    # Remove datapoints according to desired des_granularity assume 1 min
-    df = df[df['Date'].dt.second == 0]
+    # Remove datapoints according to desired des_granularity assume 1 min. For now the data fits the granularity
+    # df = df[df['Date'].dt.second == 0]
 
     return df
-
-
-def populate_updated_csv(path_dict):
-
-    print('Fetching historical data from updated CSV.')
-    # get the historic data
-    read_path = path_dict['downloaded history']
-    save_path = path_dict['updated history']
-    paths = path_dict
-
-    start_date = datetime(2015, 1, 1)
-    end_date = datetime.now()
-    df = original_csv_to_df(path_dict, start_date, end_date)
-    save_historical_data(paths, df)
 
 
 def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
@@ -113,32 +92,40 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
     # get the historic data
     path = path_dict['updated history']
 
-    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
-    df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
+    df = pd.DataFrame(columns = ['Date', 'Close'])
 
-    if df.empty:
-        populate_updated_csv(path_dict)
+    #Fetch candle data from bittrex
+    if end_date > datetime.now() - timedelta(days = 10):
+        candle_df = get_candles(bittrex_obj, df, market, 'oneMin')
+        df = df.append(candle_df)
 
-        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p")
-        df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
+    if df.empty or df.Date.min() > start_date:  #try to fetch from updated
+        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
+
+        if up_df.empty:
+            print('Updated CSV was empty.')
+            #Fetch from orig
+        else:
+            df = df.append(up_df)
+
+    if df.empty or df.Date.min() > start_date:
+        orig_df = original_csv_to_df(path_dict)
+        # if orig_df.Date.max() >= end_date:
+        #     return orig_df
+        #     end()
+        # else:
+        #     df = df.append(orig_df)
+        df = df.append(orig_df)
+
+    #Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
+    assert(df.Date.min() <= start_date)
+    if df.Date.max() < end_date:
+        print('There is a gap between the download data and the data available from Bittrex. Please update download data.')
+        assert(df.Date.max() >= end_date)
 
     df = df[['Date', 'Close']]
-    start_date_in_df = df.Date.min()
-
-
-    if start_date_in_df > start_date:  # need to fetch from original
-        orig_df = original_csv_to_df(
-            path_dict, start_date, end_date)
-        print(orig_df.head())
-        if orig_df.Date.max() >= end_date:
-            return orig_df
-            end()
-        else:
-            df = df.append(orig_df)
-
-    if end_date > df.Date.max():  # need to fetch data from Bittrex
-        df = get_candles(bittrex_obj, df, market, 'hour')
-
+    df.drop_duplicates(subset ='Date', inplace = True)
     df = df[df['Close'].notnull()]  # Remove non datapoints from the set
     df = df[df['Date'] >= start_date]
     df = df[df['Date'] <= end_date]
@@ -157,16 +144,17 @@ def save_historical_data(path_dict, df):
     # must create new df as df is passed by reference
     # # datetimes to strings
     # df = pd.DataFrame({'Date': data[:, 0], 'Close': np.float_(data[:, 1])})
-    df['Date'] = df['Date'].dt.strftime("%Y-%m-%d %I-%p")
-    df.to_csv(path)
+    df_copy = df
+    df_copy['Date'] = df_copy['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
+    df_copy.to_csv(path)
     # added this so it doesnt change if passed by object... might be wrong idk
-    df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p")
+    df_copy.Date = pd.to_datetime(df_copy.Date, format="%Y-%m-%d %I-%p-%M")
 
 
 # need a plot training results
 # plot testing results
 # plot running results
-def plot_history(data, return_on_investment=0, market_performance=0):
+def plot_history(df, return_on_investment=0, market_performance=0):
     # df = pd.DataFrame({'Date': data[:, 0], 'Close': np.float_(data[:, 1])})
 
     fig, ax = plt.subplots()  # Create the figure
@@ -175,7 +163,8 @@ def plot_history(data, return_on_investment=0, market_performance=0):
 
     # df.plot(x='Date', y='Account Value', ax=ax)
     bot, top = plt.ylim()
-    plt.ylim(0, top)
+    cushion = 200
+    plt.ylim(bot - cushion, top + cushion)
     fig.autofmt_xdate()
     plt.show()
 
@@ -514,14 +503,14 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
     def return_on_investment(final, initial):
         # Returns the percentage increase/decrease
-        return round(final / initial - 1, 2) * 100
+        return round(final / initial - 1, 4) * 100
 
 
     if mode == 'train' or 'test':
 
         # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
 
-        num_episodes = 500
+        num_episodes = 1000
         batch_size = 32  # sampleing from replay memory
         initial_investment = 1000 * 10000
         fees = 0.0025  # standard fees are 0.3% per transaction
@@ -551,8 +540,9 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             val = play_one_episode(agent, sim_env, my_scaler, mode)
             roi = return_on_investment(val, initial_investment)  # Transform to ROI
             dt = datetime.now() - t0
-            print(
-                f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f} duration: {dt}")
+            if num_episodes <= 200 or e%10 == 0:
+                print(
+                    f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f} duration: {dt}")
             portfolio_value.append(val)  # append episode end portfolio value
 
         # save the weights when we are done
@@ -569,7 +559,9 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             plt.show()
 
         # save portfolio value for each episode
+        print('Saving rewards...')
         np.save(f'{rewards_folder}/{mode}.npy', portfolio_value)
+        print('Rewards saved.')
 
     else:
         assert(mode == 'run')
@@ -626,15 +618,6 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
             time.sleep(60 * 60)  # run the agent...
 
-def plot_rl_rewards(mode):
-
-    a = np.load(f'linear_rl_trader_rewards/{mode}.npy')
-
-    print(f"average reward: {a.mean():.2f}, min: {a.min():.2f}, max: {a.max():.2f}")
-
-    plt.hist(a, bins=20)
-    plt.title(mode)
-    plt.show()
 
 def backtest(data, start, end, extrema_filter, experiment=False, fig=0, ax=0):
     # TODO throw an error here if end > start

@@ -16,57 +16,59 @@ symbols = 'BTCUSD' #Example: 'BTCUSD'
 
 if os == 'linux':
     paths = {'downloaded history': '/home/bruce/AlgoTrader/BittrexTrader/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv',
-     'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols + '.csv',
-     'secret': "/home/bruce/Documents/crypto_data/secrets.json",
-     'rewards': 'agent_rewards',
-     'models': 'agent_models'}
+             'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols + '.csv',
+             'secret': "/home/bruce/Documents/crypto_data/secrets.json",
+             'rewards': 'agent_rewards',
+             'models': 'agent_models'}
 
-     #TODO: add a loop here that appends the asset folders
+    # TODO: add a loop here that appends the asset folders
 
 elif os == 'windows':
     paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2017-05-31.csv',
-    'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols + '.csv',
-    'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-    'rewards': 'agent_rewards',
-    'models': 'agent_models'}
+             'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols + '.csv',
+             'secret': "/Users/biver/Documents/crypto_data/secrets.json",
+             'rewards': 'agent_rewards',
+             'models': 'agent_models'}
 else:
-    print('Unknown OS passed when defining the paths') #this should throw and error
+    print('Unknown OS passed when defining the paths')  # this should throw and error
 
 #get my keys
 with open(paths['secret']) as secrets_file:
-    keys = json.load(secrets_file) #loadBs the keys as a dictionary with 'key' and 'secret'
+    keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
     secrets_file.close()
 
 my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
-os = 'windows'              #linux or windows
-des_granularity = 1         #in minutes?
-symbols = 'BTCUSD'          #Example: 'BTCUSD'
 
 market = symbols[3:6] + '-' + symbols[0:3]
-# populate_updated_csv(paths)
 
-mode = 'train'
+mode = 'test'
 
 if mode == 'train':
     #train
-    start = datetime(2019,10, 1)
-    end = datetime(2019, 10, 8)
+    # start = datetime(2019,10, 1)
+    # end = datetime(2019, 10, 8)
+    start = datetime.now() - timedelta(days = 9, hours = 23)
+    end = datetime.now() - timedelta(days = 3)
     df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
     save_historical_data(paths, df)
 else:
     assert(mode == 'test')
     #test
-    start = datetime(2019,11, 1)
-    end = datetime(2019, 11, 8)
+    # start = datetime(2019,11, 1)
+    # end = datetime(2019, 11, 8)
+    start = datetime.now() - timedelta(days = 3)
+    end = datetime.now()
     df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
-    save_historical_data(paths, df)
+
+    # save_historical_data(paths, df)
 
 print('Historical data has been fetched and resaved from CSV.')
 
-print(df.head())
+
+
 
 run_agent(mode, df.drop('Date', axis = 1).values, my_bittrex, paths) #note: only passing through numpy array not df
-
+plot_history(df)
 
 
 # roi = backtest(data, start, end, extrema_filter)
