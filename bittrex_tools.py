@@ -101,7 +101,8 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
 
     if df.empty or df.Date.min() > start_date:  #try to fetch from updated
         def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
+        up_df = pd.read_csv(path, usecols = ['Date', 'Close'], parse_dates=['Date'], date_parser=dateparse)
+
 
         if up_df.empty:
             print('Updated CSV was empty.')
@@ -143,12 +144,23 @@ def save_historical_data(path_dict, df):
     path = path_dict['updated history']
     # must create new df as df is passed by reference
     # # datetimes to strings
-    # df = pd.DataFrame({'Date': data[:, 0], 'Close': np.float_(data[:, 1])})
-    df_copy = df
-    df_copy['Date'] = df_copy['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
-    df_copy.to_csv(path)
-    # added this so it doesnt change if passed by object... might be wrong idk
-    df_copy.Date = pd.to_datetime(df_copy.Date, format="%Y-%m-%d %I-%p-%M")
+    # df = pd.DataFrame({'Date': data[:, 0], 'Close': np.float_(data[:, 1])})   #convert from numpy array to df
+
+    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+    old_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
+
+    df_to_save = df.append(old_df)
+
+    df_to_save = df_to_save[['Date', 'Close']]
+    df_to_save.drop_duplicates(subset ='Date', inplace = True)
+    df_to_save = df_to_save[df_to_save['Close'].notnull()]  # Remove non datapoints from the set
+    df_to_save.sort_values(by='Date', inplace=True)
+    df_to_save.reset_index(inplace=True, drop=True)
+
+    df_to_save['Date'] = df_to_save['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
+    df_to_save.to_csv(path, index = False)
+
+    # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
 
 
 # need a plot training results
@@ -510,7 +522,7 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
         # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
 
-        num_episodes = 1000
+        num_episodes = 500
         batch_size = 32  # sampleing from replay memory
         initial_investment = 1000 * 10000
         fees = 0.0025  # standard fees are 0.3% per transaction

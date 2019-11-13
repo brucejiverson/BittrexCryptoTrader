@@ -62,7 +62,7 @@ else:
 
     # save_historical_data(paths, df)
 
-print('Historical data has been fetched and resaved from CSV.')
+print('Historical data has been fetched, updated, and resaved.')
 
 
 
