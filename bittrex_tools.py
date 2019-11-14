@@ -12,6 +12,7 @@ import re
 import os
 import pickle
 import itertools
+import math
 
 from sklearn.preprocessing import StandardScaler
 
@@ -42,7 +43,7 @@ def process_bittrex_dict(candle_dictionary):
 
 
 def get_candles(bittrex_obj, df, market, granularity):
-    #Tested with 'oneMin', and it returned exactly 10 days worth of data (14400 entries)
+    # Tested with 'oneMin', and it returned exactly 10 days worth of data (14400 entries)
 
     attempts = 0
     while True:
@@ -92,21 +93,21 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
     # get the historic data
     path = path_dict['updated history']
 
-    df = pd.DataFrame(columns = ['Date', 'Close'])
+    df = pd.DataFrame(columns=['Date', 'Close'])
 
-    #Fetch candle data from bittrex
-    if end_date > datetime.now() - timedelta(days = 10):
+    # Fetch candle data from bittrex
+    if end_date > datetime.now() - timedelta(days=10):
         candle_df = get_candles(bittrex_obj, df, market, 'oneMin')
         df = df.append(candle_df)
 
-    if df.empty or df.Date.min() > start_date:  #try to fetch from updated
+    if df.empty or df.Date.min() > start_date:  # try to fetch from updated
         def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        up_df = pd.read_csv(path, usecols = ['Date', 'Close'], parse_dates=['Date'], date_parser=dateparse)
-
+        up_df = pd.read_csv(path, usecols=['Date', 'Close'],
+                            parse_dates=['Date'], date_parser=dateparse)
 
         if up_df.empty:
             print('Updated CSV was empty.')
-            #Fetch from orig
+            # Fetch from orig
         else:
             df = df.append(up_df)
 
@@ -119,14 +120,14 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
         #     df = df.append(orig_df)
         df = df.append(orig_df)
 
-    #Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
+    # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
     assert(df.Date.min() <= start_date)
     if df.Date.max() < end_date:
         print('There is a gap between the download data and the data available from Bittrex. Please update download data.')
         assert(df.Date.max() >= end_date)
 
     df = df[['Date', 'Close']]
-    df.drop_duplicates(subset ='Date', inplace = True)
+    df.drop_duplicates(subset='Date', inplace=True)
     df = df[df['Close'].notnull()]  # Remove non datapoints from the set
     df = df[df['Date'] >= start_date]
     df = df[df['Date'] <= end_date]
@@ -152,13 +153,13 @@ def save_historical_data(path_dict, df):
     df_to_save = df.append(old_df)
 
     df_to_save = df_to_save[['Date', 'Close']]
-    df_to_save.drop_duplicates(subset ='Date', inplace = True)
+    df_to_save.drop_duplicates(subset='Date', inplace=True)
     df_to_save = df_to_save[df_to_save['Close'].notnull()]  # Remove non datapoints from the set
     df_to_save.sort_values(by='Date', inplace=True)
     df_to_save.reset_index(inplace=True, drop=True)
 
     df_to_save['Date'] = df_to_save['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
-    df_to_save.to_csv(path, index = False)
+    df_to_save.to_csv(path, index=False)
 
     # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
 
@@ -308,29 +309,22 @@ class SimulatedMarketEnv:
         self.asset_price = None
         self.cash_in_hand = None
 
-        # initializes as vector [0, 1, 2, ... 3^n_stock - 1]
-        self.action_space = np.arange(3**self.n_asset)
+        portfolio_granularity = .1  # smallest fraction of portfolio for investment in single asset
+        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
 
-        # action permutations
-        # returns a nested list with elements like:
-        # [0,0,0]
-        # [0,0,1]
-        # [0,0,2]
-        # [0,1,0]
-        # [0,1,1]
-        # etc.
-        # 0 = sell
-        # 1 = hold
-        # 2 = buy
-        """The below line initializes a list of 3*n_stock with nested lists of length
-        3 into each of the positions in the action_space, for each possible
-        permutation of an action"""
-        self.action_list = list(
-            map(list, itertools.product([0, 1, 2], repeat=self.n_asset)))
+        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
 
-        # calculate size of state
+        self.action_list = []
+        for i, item in enumerate(permutations_list):
+            if sum(item) <= 1:
+                self.action_list.append(item)
+
+        self.action_space = np.arange(len(self.action_list))
+
+        # calculate size of state (amount of each asset held, value of each asset, cash in hand)
         self.state_dim = self.n_asset * 2 + 1
 
+        self.last_action = []
         self.reset()
 
     def reset(self):
@@ -344,8 +338,7 @@ class SimulatedMarketEnv:
 
     def step(self, action):
         # Performs an action in the enviroment, and returns the next state and reward
-
-        assert action in self.action_space
+        assert action in self.action_space  # Check that a valid action was passed
 
         # get current value before performing the action
         prev_val = self._get_val()
@@ -391,43 +384,21 @@ class SimulatedMarketEnv:
 
     def _trade(self, action):
         # index the action we want to perform
-        # 0 = sell
-        # 1 = hold
-        # 2 = buy
-        # e.g. [2,1,0] means:
-        # buy first stock
-        # hold second stock
-        # sell third stock
-        # So in this case, action is a number that corresponds to one of the possible permutations of actions
+        # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
         action_vec = self.action_list[action]
-
-        # determine which stocks to buy or sell
-        sell_index = []  # stores index of stocks we want to sell
-        buy_index = []  # stores index of stocks we want to buy
-        for i, a in enumerate(action_vec):
-            if a == 0:
-                sell_index.append(i)
-            elif a == 2:
-                buy_index.append(i)
-
-        # sell any stocks we want to sell
-        # then buy any stocks we want to buy
-        if sell_index:
-            # NOTE: to simplify the problem, when we sell, we will sell ALL shares of that stock
-            for i in sell_index:
-                self.cash_in_hand += self.asset_price[i] * self.asset_owned[i]
+        if action_vec != self.last_action:  # if attmepting to change state
+            # Sell everything
+            for i, a in enumerate(action_vec):
+                self.cash_in_hand += self.asset_owned[i] * self.asset_price[i]
                 self.asset_owned[i] = 0
-        if buy_index:
-            # NOTE: when buying, we will loop through each stock we want to buy,
-            #       and buy one share at a time until we run out of cash
-            can_buy = True
-            while can_buy:
-                for i in buy_index:
-                    if self.cash_in_hand > self.asset_price[i]:
-                        self.asset_owned[i] += 1  # buy one share
-                        self.cash_in_hand -= self.asset_price[i]
-                    else:
-                        can_buy = False
+
+            # Buy back the right amounts
+            for i, a in enumerate(action_vec):
+                cash_to_use = a * self.cash_in_hand
+                self.asset_owned[i] = cash_to_use / self.asset_price[i]
+                self.cash_in_hand -= cash_to_use
+
+            self.last_action = action_vec
 
 
 class DQNAgent(object):
@@ -512,19 +483,17 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
     # variable for storing final value of the portfolio (done at end of episode)
     portfolio_value = []
 
-
     def return_on_investment(final, initial):
         # Returns the percentage increase/decrease
         return round(final / initial - 1, 4) * 100
-
 
     if mode == 'train' or 'test':
 
         # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
 
-        num_episodes = 500
+        num_episodes = 10
         batch_size = 32  # sampleing from replay memory
-        initial_investment = 1000 * 10000
+        initial_investment = 100
         fees = 0.0025  # standard fees are 0.3% per transaction
 
         n_timesteps, n_stocks = data.shape
@@ -552,7 +521,7 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             val = play_one_episode(agent, sim_env, my_scaler, mode)
             roi = return_on_investment(val, initial_investment)  # Transform to ROI
             dt = datetime.now() - t0
-            if num_episodes <= 200 or e%10 == 0:
+            if num_episodes <= 200 or e % 10 == 0:
                 print(
                     f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f} duration: {dt}")
             portfolio_value.append(val)  # append episode end portfolio value
@@ -596,7 +565,6 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
         t0 = datetime.now()
 
         while True:
-
             # Fetch new data
             candle_dict = bittrex_obj.get_candles('USD-BTC', 'minute')
             if candle_dict['success']:
@@ -629,69 +597,3 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             print('Market Performance: ', market_performance, ' %')
 
             time.sleep(60 * 60)  # run the agent...
-
-
-def backtest(data, start, end, extrema_filter, experiment=False, fig=0, ax=0):
-    # TODO throw an error here if end > start
-
-    print('Beginning backtesting.')
-
-    in_market = False
-    init_money = 100
-    money = init_money
-    fees = 0.0025  # standard fees are 0.3% per transaction
-
-    data['Account Value'] = 0
-    data['Trades'] = ''
-
-    df = pd.DataFrame(columns=data.columns)
-    # Bad practice to modify same object you loop over, so 'df' is used
-    last_min_num = 0
-    last_max_num = 0
-    market_start = 0
-
-    for i, row in data.iterrows():
-
-        df = df.append(row)
-        date = row.Date
-        price = row.Close
-        if date < start:
-            continue
-        elif date >= start and market_start == 0:
-            market_start = price
-
-        trade = ''
-
-        signal, sig_reason, last_max_num, last_min_num = strategy(
-            df, date, price, last_min_num, last_max_num)
-
-        # Trade based on signal
-        if signal == 'bullish' and not in_market:
-            [money, in_market, trade] = test_trade(
-                money, in_market, trade, price, date, fees, sig_reason)
-        elif signal == 'bearish' and in_market:
-            [money, in_market, trade] = test_trade(
-                money, in_market, trade, price, date, fees, sig_reason)
-        # Calculate account value in USD
-        if in_market:
-            account_value = money * row.loc['Close']
-        else:
-            account_value = money
-
-        df.at[i, 'Account Value'] = account_value
-        df.at[i, 'Trades'] = trade
-
-    # Note: can access by index
-    return_on_investment = return_on_investment(account_value, init_money)
-    print('Account Return: ', return_on_investment, ' %')
-
-    try:
-        market_end = df.loc[df.Date == end, 'Close'].to_numpy()[0]
-        market_performance = return_on_investment(market_end, market_start)
-        print('Market Performance: ', market_performance, ' %')
-    except IndexError:
-        print('No date in DF == to end')
-
-    # plot_history(df, start, return_on_investment, market_performance)
-    plot_history(df, start)
-    return return_on_investment

@@ -41,31 +41,30 @@ my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
 market = symbols[3:6] + '-' + symbols[0:3]
 
-mode = 'test'
+mode = 'train'
 
 if mode == 'train':
     #train
-    # start = datetime(2019,10, 1)
-    # end = datetime(2019, 10, 8)
-    start = datetime.now() - timedelta(days = 9, hours = 23)
-    end = datetime.now() - timedelta(days = 3)
+    start = datetime(2016,1, 1)
+    end = datetime(2017, 1, 1)
+    # start = datetime.now() - timedelta(days = 9, hours = 23)
+    # end = datetime.now() - timedelta(days = 5)
     df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
     save_historical_data(paths, df)
 else:
     assert(mode == 'test')
     #test
-    # start = datetime(2019,11, 1)
-    # end = datetime(2019, 11, 8)
-    start = datetime.now() - timedelta(days = 3)
-    end = datetime.now()
+    start = datetime(2019,11, 10)
+    end = datetime(2019, 11, 13)
+    # start = datetime.now() - timedelta(days = 5)
+    # end = datetime.now()
     df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
 
     # save_historical_data(paths, df)
 
 print('Historical data has been fetched, updated, and resaved.')
 
-
-
+plot_history(df)
 
 run_agent(mode, df.drop('Date', axis = 1).values, my_bittrex, paths) #note: only passing through numpy array not df
 
