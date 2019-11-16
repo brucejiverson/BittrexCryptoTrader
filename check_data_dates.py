@@ -1,4 +1,6 @@
+from bittrex_tools import *
 import pandas as pd
+
 
 symbols = 'BTCUSD' #Example: 'BTCUSD'
 
@@ -9,3 +11,5 @@ up_df = pd.read_csv(path, usecols=['Date', 'Close'], parse_dates=['Date'], date_
 
 print('The earliest date is: ', up_df.Date.min())
 print('The latest date is: ', up_df.Date.max())
+
+plot_history(up_df)

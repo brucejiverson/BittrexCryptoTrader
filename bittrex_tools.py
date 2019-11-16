@@ -13,6 +13,7 @@ import os
 import pickle
 import itertools
 import math
+from statistics import mean
 
 from sklearn.preprocessing import StandardScaler
 
@@ -32,10 +33,10 @@ def process_bittrex_dict(candle_dictionary):
     # V and BV refer to volume and base volume
     df = pd.DataFrame(candle_dictionary['result'])
     df.drop(columns=["BV", "V", 'O', 'H', 'L'])
-    df = df.rename(columns={'T': "Date", 'C': 'Close'})
+    df = df.rename(columns={'T': "Date", 'C': 'BTCUSD'})
 
     # reorder the columns (defaults to alphabetic)
-    df = df[['Date', 'Close']]
+    df = df[['Date', 'BTCUSD']]
     df.reset_index(inplace=True, drop=True)
     # dates into datetimess
     df.Date = pd.to_datetime(df.Date, format="%Y-%m-%dT%H:%M:%S")
@@ -63,25 +64,13 @@ def get_candles(bittrex_obj, df, market, granularity):
     return df
 
 
-def original_csv_to_df(path_dict):
-
-    print('Fetching historical data from download CSV.')
-
-    # get the historic data
-    path = path_dict['downloaded history']
-
-    def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-    df = pd.read_csv(path, usecols=['Timestamp', 'Close'], parse_dates=[
-                     'Timestamp'], date_parser=dateparse)
-    df.rename(columns={'Timestamp': 'Date'}, inplace=True)
-
-    # cryptodatadownload def dateparse(x): return pd.datetime.strptime(x, '%Y-%m-%d %I-%p-%M')
-    # df = pd.read_csv(path, header = 1, usecols = ['Date', 'Close'], parse_dates=['Date'], date_parser=dateparse)
-
-    # Remove datapoints according to desired des_granularity assume 1 min. For now the data fits the granularity
-    # df = df[df['Date'].dt.second == 0]
-
-    return df
+def format_df(input_df):
+    input_df = input_df[['Date', 'BTCUSD']]
+    input_df.drop_duplicates(subset='Date', inplace=True)
+    input_df = input_df[input_df['BTCUSD'].notnull()]  # Remove non datapoints from the set
+    input_df.sort_values(by='Date', inplace=True)
+    input_df.reset_index(inplace=True, drop=True)
+    return input_df
 
 
 def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
@@ -93,7 +82,7 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
     # get the historic data
     path = path_dict['updated history']
 
-    df = pd.DataFrame(columns=['Date', 'Close'])
+    df = pd.DataFrame(columns=['Date', 'BTCUSD'])
 
     # Fetch candle data from bittrex
     if end_date > datetime.now() - timedelta(days=10):
@@ -101,39 +90,58 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
         df = df.append(candle_df)
 
     if df.empty or df.Date.min() > start_date:  # try to fetch from updated
+        print('Fetching data from cumulative data repository.')
+
         def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        up_df = pd.read_csv(path, usecols=['Date', 'Close'],
+        up_df = pd.read_csv(path, usecols=['Date', 'BTCUSD'],
                             parse_dates=['Date'], date_parser=dateparse)
 
         if up_df.empty:
-            print('Updated CSV was empty.')
-            # Fetch from orig
+            print('Cumulative data repository was empty.')
         else:
+            print('Success fetching from cumulative data repository.')
             df = df.append(up_df)
 
     if df.empty or df.Date.min() > start_date:
-        orig_df = original_csv_to_df(path_dict)
-        # if orig_df.Date.max() >= end_date:
-        #     return orig_df
-        #     end()
-        # else:
-        #     df = df.append(orig_df)
+
+        print('Fetching data from the download file.')
+        # get the historic data
+
+        def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+        orig_df = pd.read_csv(path_dict['downloaded history'], usecols=['Timestamp', 'BTCUSD'], parse_dates=[
+            'Timestamp'], date_parser=dateparse)
+        orig_df.rename(columns={'Timestamp': 'Date'}, inplace=True)
+
+        assert not orig_df.empty
+
         df = df.append(orig_df)
 
     # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
     assert(df.Date.min() <= start_date)
+
     if df.Date.max() < end_date:
         print('There is a gap between the download data and the data available from Bittrex. Please update download data.')
         assert(df.Date.max() >= end_date)
 
-    df = df[['Date', 'Close']]
-    df.drop_duplicates(subset='Date', inplace=True)
-    df = df[df['Close'].notnull()]  # Remove non datapoints from the set
     df = df[df['Date'] >= start_date]
     df = df[df['Date'] <= end_date]
-    df.sort_values(by='Date', inplace=True)
-    df.reset_index(inplace=True, drop=True)
+    df = format_df(df)
+
     return df
+
+
+def filter_error_from_download_data(my_df):
+    print('Filtering data for errors...')
+    for i, row in my_df.iterrows():
+        if i > 0 and i < len(my_df.Date) - 2:
+            try:
+                if my_df.loc[i, 'BTCUSD'] < 0.5 * mean([my_df.loc[i - 1, 'BTCUSD'], my_df.loc[i + 1, 'BTCUSD']]):
+                    my_df.drop(i, axis=0, inplace=True)
+                    print('Filtered a critical point.')
+            except KeyError:
+                print(i, len(my_df.Date))
+    my_df = format_df(my_df)
+    return my_df
 
 
 def save_historical_data(path_dict, df):
@@ -145,34 +153,35 @@ def save_historical_data(path_dict, df):
     path = path_dict['updated history']
     # must create new df as df is passed by reference
     # # datetimes to strings
-    # df = pd.DataFrame({'Date': data[:, 0], 'Close': np.float_(data[:, 1])})   #convert from numpy array to df
+    # df = pd.DataFrame({'Date': data[:, 0], 'BTCUSD': np.float_(data[:, 1])})   #convert from numpy array to df
 
     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
     old_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
 
     df_to_save = df.append(old_df)
 
-    df_to_save = df_to_save[['Date', 'Close']]
-    df_to_save.drop_duplicates(subset='Date', inplace=True)
-    df_to_save = df_to_save[df_to_save['Close'].notnull()]  # Remove non datapoints from the set
-    df_to_save.sort_values(by='Date', inplace=True)
-    df_to_save.reset_index(inplace=True, drop=True)
+    df_to_save = format_df(df_to_save)
+
+    # df_to_save = filter_error_from_download_data(df_to_save)
 
     df_to_save['Date'] = df_to_save['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
     df_to_save.to_csv(path, index=False)
 
     # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
-
+    print('Data written.')
 
 # need a plot training results
 # plot testing results
 # plot running results
-def plot_history(df, return_on_investment=0, market_performance=0):
-    # df = pd.DataFrame({'Date': data[:, 0], 'Close': np.float_(data[:, 1])})
 
+
+def plot_history(df, return_on_investment=0, market_performance=0):
+    # df = pd.DataFrame({'Date': data[:, 0], 'BTCUSD': np.float_(data[:, 1])})
+
+    assert not df.empty
     fig, ax = plt.subplots()  # Create the figure
 
-    df.plot(x='Date', y='Close', ax=ax)
+    df.plot(x='Date', y='BTCUSD', ax=ax)
 
     # df.plot(x='Date', y='Account Value', ax=ax)
     bot, top = plt.ylim()
@@ -284,7 +293,7 @@ class SimulatedMarketEnv:
       - # shares of asset 1 owned
       - # shares of asset 2 owned
       - # shares of asset 3 owned
-      - price of asset 1 (using close price)
+      - price of asset 1 (using BTCUSD price)
       - price of asset 2
       - price of asset 3
       - cash owned (can be used to purchase more assets, USD)
@@ -414,8 +423,8 @@ class DQNAgent(object):
 
         self.gamma = 0.95  # discount rate
         self.epsilon = 1.0  # exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
+        self.epsilon_min = 0.001    #originally .01
+        self.epsilon_decay = 0.99   #originall .995
         # Get an instance of our model
         self.model = LinearModel(state_size, action_size)
 
@@ -453,22 +462,36 @@ class DQNAgent(object):
         self.model.save_weights(name)
 
 
-def play_one_episode(agent, env, scaler, is_train):
+def play_one_episode(agent, env, scaler, is_train, record=False):
     # note: after transforming states are already 1xD
+    log_columns = ['BTC', 'BTCUSD', 'USD']
+    log = pd.DataFrame(columns=log_columns)
 
     state = env.reset()
+
+    if record == True:
+        log = log.append(pd.DataFrame.from_records(
+            [dict(zip(log_columns, state))]), ignore_index=True)
+
     state = scaler.transform([state])
     done = False
 
     while not done:
+
         action = agent.act(state)
         next_state, reward, done, info = env.step(action)
+
+        if record == True:
+            log = log.append(pd.DataFrame.from_records(
+                [dict(zip(log_columns, next_state))]), ignore_index=True)
+
+        save = next_state
         next_state = scaler.transform([next_state])
-        if is_train == 'train':
+        if is_train in ['train', 'add_train']:
             agent.train(state, action, reward, next_state, done)
         state = next_state
 
-    return info['cur_val']
+    return info['cur_val'], log
 
 
 def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
@@ -487,11 +510,11 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
         # Returns the percentage increase/decrease
         return round(final / initial - 1, 4) * 100
 
-    if mode == 'train' or 'test':
+    if mode in ['train', 'test', 'add_train']:
 
         # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
 
-        num_episodes = 10
+        num_episodes = 500
         batch_size = 32  # sampleing from replay memory
         initial_investment = 100
         fees = 0.0025  # standard fees are 0.3% per transaction
@@ -504,13 +527,22 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
         my_scaler = get_scaler(sim_env)
 
         if mode == 'test':
+            print('Testing...')
+            num_episodes = 10
             # then load the previous scaler
             with open(f'{models_folder}/scaler.pkl', 'rb') as f:
                 my_scaler = pickle.load(f)
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon = 0.01
+            agent.epsilon = 0
+
+            # load trained weights
+            agent.load(f'{models_folder}/linear.npz')
+        elif mode == 'add_train':
+            # then load the previous scaler
+            with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+                my_scaler = pickle.load(f)
 
             # load trained weights
             agent.load(f'{models_folder}/linear.npz')
@@ -518,16 +550,20 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
         # play the game num_episodes times
         for e in range(num_episodes):
             t0 = datetime.now()
-            val = play_one_episode(agent, sim_env, my_scaler, mode)
+
+            if e == num_episodes - 1 and mode == 'test':
+                val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
+            else:
+                val, state_log = play_one_episode(agent, sim_env, my_scaler, mode)
             roi = return_on_investment(val, initial_investment)  # Transform to ROI
             dt = datetime.now() - t0
-            if num_episodes <= 200 or e % 10 == 0:
+            if num_episodes <= 2000 or e % 10 + 1 == 0:
                 print(
                     f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f} duration: {dt}")
             portfolio_value.append(val)  # append episode end portfolio value
 
         # save the weights when we are done
-        if mode == 'train':
+        if mode in ['train', 'add_train']:
             # save the DQN
             agent.save(f'{models_folder}/linear.npz')
 
@@ -538,16 +574,27 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             # plot losses
             plt.plot(agent.model.losses)
             plt.show()
+        elif mode == 'test':
+            #add a value column
+            values = []
+            for i, row in state_log.iterrows():
+                asset_owned = row.BTC
+                asset_price = row.BTCUSD
+                cash = row.USD
+                values.append(asset_owned * asset_price + cash)
+            state_log['Value'] =  values
 
         # save portfolio value for each episode
         print('Saving rewards...')
         np.save(f'{rewards_folder}/{mode}.npy', portfolio_value)
         print('Rewards saved.')
 
+        return state_log
+
     else:
         assert(mode == 'run')
 
-        trade_log = pd.DataFrame(columns=['Date', 'Close', 'Symbol'])
+        trade_log = pd.DataFrame(columns=['Date', 'BTCUSD', 'Symbol'])
         my_balance = bittrex_obj.get_balance('BTC')
 
         # load the previous scaler
