@@ -41,21 +41,21 @@ my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
 market = symbols[3:6] + '-' + symbols[0:3]
 
-mode = 'add_train'
+mode = 'test'
 
 if mode == 'train' or mode == 'add_train':
     #train
     # start = datetime(2018,3, 15)
     start = datetime(2019,11, 2)
-    # end = datetime(2019, 6, 1)
-    end = datetime.now()
+    end = datetime(2019, 11, 3)
+    # end = datetime.now() - timedelta(hours = 6)
 
 else:
     assert(mode == 'test')  #make sure that a proper mode was passed
     #test
-    start = datetime(2019,11, 2)
+    start = datetime(2019,11, 3)
     # end = datetime(2019, 11, 14)
-    end = datetime.now()
+    end = datetime.now() - timedelta(hours = 6)
 df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
 
 save_historical_data(paths, df)
@@ -69,7 +69,7 @@ if mode == 'test':
     fig, ax = plt.subplots()  # Create the figure
 
     state_log['Date'] = df.Date
-    state_log.plot(x='Date', y='Value', ax=ax)
+    state_log.plot(x='Date', y='USD', ax=ax)
     # state_log.plot(x='Date', y='BTCUSD', ax=ax)
     # df.plot(x='Date', y='Account Value', ax=ax)
     bot, top = plt.ylim()
