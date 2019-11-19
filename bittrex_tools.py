@@ -318,12 +318,17 @@ class SimulatedMarketEnv:
         self.asset_price = None
         self.cash_in_hand = None
 
-        portfolio_granularity = .01  # smallest fraction of portfolio for investment in single asset
-        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
+        #Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
+        self.n_indicators = 2
+        self.indicators = list(range(self.n_indicators))    #Going to be
 
-        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
 
+        portfolio_granularity = .1  # smallest fraction of portfolio for investment in single asset
+        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))] #The possible portions of the portfolio that could be allocated to a single asset
+
+        #calculate all possible allocations of wealth across the available
         self.action_list = []
+        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
         for i, item in enumerate(permutations_list):
             if sum(item) <= 1:
                 self.action_list.append(item)
@@ -413,6 +418,8 @@ class SimulatedMarketEnv:
             self.last_action = action_vec
 
 
+
+
 class RealMarketEnv:
     """
     A multi-asset trading environment.
@@ -443,7 +450,7 @@ class RealMarketEnv:
 
         self.n_asset = self.asset_price_history.shape
         # instance attributes
-        self.initial_investment = 0 #read from bittrex
+        self.initial_investment = 0  # read from bittrex
         self.cur_step = None
         self.asset_owned = None
         self.asset_price = None
@@ -468,9 +475,9 @@ class RealMarketEnv:
         self.reset()
 
     def reset(self):
-        #Resets the environement to the initial state
+        # Resets the environement to the initial state
         self.cur_step = 0  # point to the first datetime in the dataset
-        #Own no assets to start with
+        # Own no assets to start with
         self.asset_owned = np.zeros(self.n_asset)
         self.asset_price = self.asset_price_history[self.cur_step]
         self.cash_in_hand = self.initial_investment
@@ -511,9 +518,9 @@ class RealMarketEnv:
         # Note that the state could be a transformation of the observation, or
         # multiple past observations stacked.)
 
-        #get the latest candle data
-        #get the amount owned of the assets
-        #get the USD owned
+        # get the latest candle data
+        # get the amount owned of the assets
+        # get the USD owned
 
         obs = np.empty(self.state_dim)
         # How many of each asset are owned
@@ -540,7 +547,7 @@ class RealMarketEnv:
             for i, a in enumerate(action_vec):
                 cash_to_use = a * self.cash_in_hand
                 self.asset_owned[i] = cash_to_use / self.asset_price[i]
-                self.cash_in_hand -= cash_to_use*(1 + .0025)
+                self.cash_in_hand -= cash_to_use * (1 + .0025)
 
             self.last_action = action_vec
 
@@ -558,8 +565,8 @@ class DQNAgent(object):
 
         self.gamma = 0.95  # discount rate
         self.epsilon = 1.0  # exploration rate
-        self.epsilon_min = 0.001    #originally .01
-        self.epsilon_decay = 0.99   #originall .995
+        self.epsilon_min = 0.001  # originally .01
+        self.epsilon_decay = 0.99  # originall .995
         # Get an instance of our model
         self.model = LinearModel(state_size, action_size)
 
@@ -652,9 +659,9 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
         # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
 
-        num_episodes = 1000
+        num_episodes = 3000
         batch_size = 32  # sampleing from replay memory
-        initial_investment = 100
+        initial_investment = 10000
         # fees = 0.0025  # standard fees are 0.3% per transaction
 
         n_timesteps, n_stocks = data.shape
@@ -673,7 +680,7 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon = 0.0001
+            agent.epsilon = 0.001
 
             # load trained weights
             agent.load(f'{models_folder}/linear.npz')
@@ -685,6 +692,8 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             # load trained weights
             agent.load(f'{models_folder}/linear.npz')
 
+        end_time = timedelta(hours=0)
+
         # play the game num_episodes times
         for e in range(num_episodes):
             t0 = datetime.now()
@@ -695,10 +704,14 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
                 val = play_one_episode(agent, sim_env, my_scaler, mode)
             roi = return_on_investment(val, initial_investment)  # Transform to ROI
             dt = datetime.now() - t0
-            end_time = dt* (num_episodes - e)
-            if num_episodes <= 2000 or e % 10 + 1 == 0:
-                print(
-                    f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f} duration: {dt}, time til finish: {end_time}")
+            # if not end_time in locals():    #initialize with a direct calculation
+            #     end_time = dt* (num_episodes - e)
+            # else:
+            end_time -= dt
+            end_time = end_time + (dt * (num_episodes - (e + 1)) - end_time)/(e + 1)
+
+            if num_episodes <= 1000 or e % 10 == 0:
+                print(f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f} duration: {dt}, time til finish: {end_time}")
             portfolio_value.append(val)  # append episode end portfolio value
 
 
@@ -715,14 +728,14 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             plt.plot(agent.model.losses)
             plt.show()
         elif mode == 'test':
-            #add a value column
-            values = []
+            # add a value column
+            values=[]
             for i, row in state_log.iterrows():
-                asset_owned = row.BTC
-                asset_price = row.BTCUSD
-                cash = row.USD
+                asset_owned=row.BTC
+                asset_price=row.BTCUSD
+                cash=row.USD
                 values.append(asset_owned * asset_price + cash)
-            state_log['Value'] =  values
+            state_log['Value']=values
 
         # save portfolio value for each episode
         print('Saving rewards...')
@@ -734,40 +747,40 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
     else:
         assert(mode == 'run')
 
-        trade_log = pd.DataFrame(columns=['Date', 'BTCUSD', 'Symbol'])
-        my_balance = bittrex_obj.get_balance('BTC')
+        trade_log=pd.DataFrame(columns=['Date', 'BTCUSD', 'Symbol'])
+        my_balance=bittrex_obj.get_balance('BTC')
 
         # load the previous scaler
         with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-            scaler = pickle.load(f)
+            scaler=pickle.load(f)
 
         # make sure epsilon is not 1!
         # Set to 0 for purely deterministic
-        agent.epsilon = 0.01
+        agent.epsilon=0.01
 
         # load trained weights
         agent.load(f'{models_folder}/linear.npz')
 
         # Loop to play one episode
-        t0 = datetime.now()
+        t0=datetime.now()
 
         while True:
             # Fetch new data
-            candle_dict = bittrex_obj.get_candles('USD-BTC', 'minute')
+            candle_dict=bittrex_obj.get_candles('USD-BTC', 'minute')
             if candle_dict['success']:
-                new_df = process_bittrex_dict(candle_dict)
+                new_df=process_bittrex_dict(candle_dict)
             else:
                 print("Failed to get candle data")
                 continue
 
-            df = df.append(new_df)
-            df = df.drop_duplicates(['Date'])
-            df = df.sort_values(by='Date')
+            df=df.append(new_df)
+            df=df.drop_duplicates(['Date'])
+            df=df.sort_values(by='Date')
             df.reset_index(inplace=True, drop=True)
 
             if first_check:
-                market_start = price
-                first_check = False
+                market_start=price
+                first_check=False
 
             # def buy_limit(self, market, quantity, rate):
             # """
@@ -778,9 +791,9 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             # This allows for accessing by index
             # df.reset_index(inplace=True, drop=True) necessary for plotting
 
-            return_on_investment = return_on_investment(account_value, 100)
+            return_on_investment=return_on_investment(account_value, 100)
             print('Account Return: ', return_on_investment, ' %')
-            market_performance = return_on_investment(price, market_start)
+            market_performance=return_on_investment(price, market_start)
             print('Market Performance: ', market_performance, ' %')
 
             time.sleep(60 * 60)  # run the agent...
