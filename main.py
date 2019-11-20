@@ -19,7 +19,8 @@ if os == 'linux':
              'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols + '.csv',
              'secret': "/home/bruce/Documents/crypto_data/secrets.json",
              'rewards': 'agent_rewards',
-             'models': 'agent_models'}
+             'models': 'agent_models',
+              'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
 
     # TODO: add a loop here that appends the asset folders
 
@@ -28,7 +29,8 @@ elif os == 'windows':
              'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols + '.csv',
              'secret': "/Users/biver/Documents/crypto_data/secrets.json",
              'rewards': 'agent_rewards',
-             'models': 'agent_models'}
+             'models': 'agent_models',
+             'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
 else:
     print('Unknown OS passed when defining the paths')  # this should throw and error
 
@@ -72,7 +74,7 @@ if mode == 'test':
     # state_log.plot(x='Date', y='BTCUSD', ax=ax)
     state_log.plot(x='Date', y='USD', ax=ax)
     # df.plot(x='Date', y='Account Value', ax=ax)
-    
+
     bot, top = plt.ylim()
     cushion = 200
     plt.ylim(bot - cushion, top + cushion)
