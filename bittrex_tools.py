@@ -170,6 +170,24 @@ def save_historical_data(path_dict, df):
     # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
     print('Data written.')
 
+
+def add_sma_as_column(df, p):
+    # p is a number
+    array = df['BTCUSD'].values  # returns an np array
+
+    sma = np.empty_like(array)
+    for i, item in enumerate(np.nditer(array)):
+        if i == 0:
+            sma[i] = item
+        elif i < p:
+            sma[i] = array[0:i].mean()
+        else:
+            sma[i] = array[i - p:i].mean()
+
+    df['SMA_' + str(p)] = sma  # modifies the input df
+
+    # print(sma[0])
+
 # need a plot training results
 # plot testing results
 # plot running results
@@ -182,6 +200,10 @@ def plot_history(df, return_on_investment=0, market_performance=0):
     fig, ax = plt.subplots()  # Create the figure
 
     df.plot(x='Date', y='BTCUSD', ax=ax)
+
+    for col in df.columns:
+        if col[0:3] == 'SMA':
+            df.plot(x='Date', y=col, ax=ax)
 
     # df.plot(x='Date', y='Account Value', ax=ax)
     bot, top = plt.ylim()
@@ -308,25 +330,30 @@ class SimulatedMarketEnv:
     def __init__(self, data, initial_investment=100):
         # data
         self.asset_price_history = data
+        self.n_indicators = 1
 
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, self.n_asset = self.asset_price_history.shape
+        # for now this works but will need to be updated when multiple assets are added
+        self.n_asset -= self.n_indicators
         # instance attributes
         self.initial_investment = initial_investment
         self.cur_step = None
         self.asset_owned = None
         self.asset_price = None
+        self.asset_indicators = None
         self.cash_in_hand = None
 
-        #Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
-        self.n_indicators = 2
-        self.indicators = list(range(self.n_indicators))    #Going to be
+        # Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
 
+        self.min_trade_spacing = 10  # The number of datapoints that must occur between trades
+        self.period_since_trade = self.min_trade_spacing
 
-        portfolio_granularity = .1  # smallest fraction of portfolio for investment in single asset
-        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))] #The possible portions of the portfolio that could be allocated to a single asset
+        portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset
+        # The possible portions of the portfolio that could be allocated to a single asset
+        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
 
-        #calculate all possible allocations of wealth across the available
+        # calculate all possible allocations of wealth across the available
         self.action_list = []
         permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
         for i, item in enumerate(permutations_list):
@@ -336,7 +363,7 @@ class SimulatedMarketEnv:
         self.action_space = np.arange(len(self.action_list))
 
         # calculate size of state (amount of each asset held, value of each asset, cash in hand)
-        self.state_dim = self.n_asset * 2 + 1
+        self.state_dim = self.n_asset * 2 + 1 + self.n_indicators
 
         self.last_action = []
         self.reset()
@@ -346,7 +373,13 @@ class SimulatedMarketEnv:
         self.cur_step = 0  # point to the first datetime in the dataset
         # Own no assets to start with
         self.asset_owned = np.zeros(self.n_asset)
-        self.asset_price = self.asset_price_history[self.cur_step]
+
+        """ the data, for asset_price_history can be thought of as nested arrays, where indexing the
+        highest order array gives a snapshot of all data at a particular time, and information at the point
+        in time can be captured by indexing that snapshot."""
+        self.asset_price = self.asset_price_history[self.cur_step][0:self.n_asset]
+        self.asset_indicators = self.asset_price_history[self.cur_step][self.n_asset:(self.n_asset + self.n_indicators)]
+
         self.cash_in_hand = self.initial_investment
         return self._get_obs()  # Return the state vector (same as obervation for now)
 
@@ -362,7 +395,12 @@ class SimulatedMarketEnv:
 
         # update price, i.e. go to the next day
         self.cur_step += 1
-        self.asset_price = self.asset_price_history[self.cur_step]
+
+        """ the data, for asset_price_history can be thought of as nested arrays, where indexing the
+        highest order array gives a snapshot of all data at a particular time, and information at the point
+        in time can be captured by indexing that snapshot."""
+        self.asset_price = self.asset_price_history[self.cur_step][0:self.n_asset]
+        self.asset_indicators = self.asset_price_history[self.cur_step][self.n_asset:(self.n_asset + self.n_indicators)]
 
         # perform the trade
         self._trade(action)
@@ -371,7 +409,7 @@ class SimulatedMarketEnv:
         cur_val = self._get_val()
 
         # reward is the increase in porfolio value
-        reward = cur_val - prev_val
+        reward = (cur_val - prev_val) / prev_val
 
         # done if we have run out of data
         done = self.cur_step == self.n_step - 1
@@ -389,11 +427,16 @@ class SimulatedMarketEnv:
         # multiple past observations stacked.)
 
         obs = np.empty(self.state_dim)
+
         # How many of each asset are owned
         obs[:self.n_asset] = self.asset_owned
         # Value of each stock
         obs[self.n_asset:2 * self.n_asset] = self.asset_price
+        # indicators associated with each stock
+        obs[2*self.n_asset:(2*self.n_asset + self.n_indicators)] = self.asset_indicators
         obs[-1] = self.cash_in_hand
+        # if self.cur_step == 1:
+        #     print(obs)
         return obs
 
     def _get_val(self):
@@ -403,7 +446,8 @@ class SimulatedMarketEnv:
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
         action_vec = self.action_list[action]
-        if action_vec != self.last_action:  # if attmepting to change state
+
+        if action_vec != self.last_action and self.period_since_trade >= self.min_trade_spacing:  # if attmepting to change state
             # Sell everything
             for i, a in enumerate(action_vec):
                 self.cash_in_hand += self.asset_owned[i] * self.asset_price[i]
@@ -416,8 +460,9 @@ class SimulatedMarketEnv:
                 self.cash_in_hand -= cash_to_use
 
             self.last_action = action_vec
-
-
+            self.period_since_trade = 0
+        else:
+            self.period_since_trade += 1
 
 
 class RealMarketEnv:
@@ -659,9 +704,9 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
         # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
 
-        num_episodes = 3000
+        num_episodes = 3500
         batch_size = 32  # sampleing from replay memory
-        initial_investment = 10000
+        initial_investment = 1000
         # fees = 0.0025  # standard fees are 0.3% per transaction
 
         n_timesteps, n_stocks = data.shape
@@ -673,14 +718,14 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
         if mode == 'test':
             print('Testing...')
-            num_episodes = 10
+            num_episodes = 50
             # then load the previous scaler
             with open(f'{models_folder}/scaler.pkl', 'rb') as f:
                 my_scaler = pickle.load(f)
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon = 0.001
+            agent.epsilon = 0
 
             # load trained weights
             agent.load(f'{models_folder}/linear.npz')
@@ -708,12 +753,12 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             #     end_time = dt* (num_episodes - e)
             # else:
             end_time -= dt
-            end_time = end_time + (dt * (num_episodes - (e + 1)) - end_time)/(e + 1)
+            end_time = end_time + (dt * (num_episodes - (e + 1)) - end_time) / (e + 1)
 
             if num_episodes <= 1000 or e % 10 == 0:
-                print(f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f} duration: {dt}, time til finish: {end_time}")
+                print(
+                    f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f}, timeremaining: {end_time}")
             portfolio_value.append(val)  # append episode end portfolio value
-
 
         # save the weights when we are done
         if mode in ['train', 'add_train']:
@@ -727,15 +772,17 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             # plot losses
             plt.plot(agent.model.losses)
             plt.show()
+
+            state_log = pd.DataFrame()
         elif mode == 'test':
             # add a value column
-            values=[]
+            values = []
             for i, row in state_log.iterrows():
-                asset_owned=row.BTC
-                asset_price=row.BTCUSD
-                cash=row.USD
+                asset_owned = row.BTC
+                asset_price = row.BTCUSD
+                cash = row.USD
                 values.append(asset_owned * asset_price + cash)
-            state_log['Value']=values
+            state_log['Value'] = values
 
         # save portfolio value for each episode
         print('Saving rewards...')
@@ -747,40 +794,40 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
     else:
         assert(mode == 'run')
 
-        trade_log=pd.DataFrame(columns=['Date', 'BTCUSD', 'Symbol'])
-        my_balance=bittrex_obj.get_balance('BTC')
+        trade_log = pd.DataFrame(columns=['Date', 'BTCUSD', 'Symbol'])
+        my_balance = bittrex_obj.get_balance('BTC')
 
         # load the previous scaler
         with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-            scaler=pickle.load(f)
+            scaler = pickle.load(f)
 
         # make sure epsilon is not 1!
         # Set to 0 for purely deterministic
-        agent.epsilon=0.01
+        agent.epsilon = 0.01
 
         # load trained weights
         agent.load(f'{models_folder}/linear.npz')
 
         # Loop to play one episode
-        t0=datetime.now()
+        t0 = datetime.now()
 
         while True:
             # Fetch new data
-            candle_dict=bittrex_obj.get_candles('USD-BTC', 'minute')
+            candle_dict = bittrex_obj.get_candles('USD-BTC', 'minute')
             if candle_dict['success']:
-                new_df=process_bittrex_dict(candle_dict)
+                new_df = process_bittrex_dict(candle_dict)
             else:
                 print("Failed to get candle data")
                 continue
 
-            df=df.append(new_df)
-            df=df.drop_duplicates(['Date'])
-            df=df.sort_values(by='Date')
+            df = df.append(new_df)
+            df = df.drop_duplicates(['Date'])
+            df = df.sort_values(by='Date')
             df.reset_index(inplace=True, drop=True)
 
             if first_check:
-                market_start=price
-                first_check=False
+                market_start = price
+                first_check = False
 
             # def buy_limit(self, market, quantity, rate):
             # """
@@ -791,9 +838,9 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             # This allows for accessing by index
             # df.reset_index(inplace=True, drop=True) necessary for plotting
 
-            return_on_investment=return_on_investment(account_value, 100)
+            return_on_investment = return_on_investment(account_value, 100)
             print('Account Return: ', return_on_investment, ' %')
-            market_performance=return_on_investment(price, market_start)
+            market_performance = return_on_investment(price, market_start)
             print('Market Performance: ', market_performance, ' %')
 
             time.sleep(60 * 60)  # run the agent...

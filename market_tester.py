@@ -41,14 +41,19 @@ def process_order_data(dict):
 def save_trade_data(trade_df, path_dict):
     save_path = path_dict['test trade log']
 
-
-    # df_to_save = filter_error_from_download_data(df_to_save)
     try:
+        def dateparse(x):
+            try:
+                return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+            except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
+                return datetime(year = 2000, month = 1, day = 1)
 
-        # def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        # old_df = pd.read_csv(save_path, parse_dates=['Opened', 'Closed'], date_parser=dateparse)
-        #
-        # trade_df = trade_df.append(old_df)
+        old_df = pd.read_csv(save_path, parse_dates=['Opened', 'Closed'], date_parser=dateparse)
+
+        trade_df = trade_df.append(old_df)
+        trade_df.sort_values(by='Opened', inplace=True)
+        trade_df.reset_index(inplace=True, drop=True)
+
         trade_df['Closed'] = trade_df['Closed'].dt.strftime("%Y-%m-%d %I-%p-%M")
         trade_df['Opened'] = trade_df['Opened'].dt.strftime("%Y-%m-%d %I-%p-%M")
 
@@ -74,6 +79,7 @@ def cancel_all_orders(bittrex_obj, markit):
     else:
         print('Failed to get order history.')
         print(result)
+
 
 def order(amount, side):
   # Note that bittrex exchange is based in GMT 8 hours ahead of CA
@@ -170,7 +176,7 @@ if balance_response['success']:
 
 USD = my_bittrex.get_balance('USD')['result']['Balance']
 
-num_trades = 20
+num_trades = 10
 
 # Price in USD, price per unit is $/BTC
 
@@ -183,11 +189,11 @@ for n in list(range(num_trades)):
 
     # Note that bittrex exchange is based in GMT 8 hours ahead of CA
     trade_incomplete = True
-    retries = 5
+    # retries = 5
     while trade_incomplete:
-        if retries <= 0:
-            print('Failed to order 5 times.')
-            break
+        # if retries <= 0:
+        #     print('Failed to order 5 times.')
+        #     break
 
         start_time = datetime.now()
         amount = 5  # in USD
@@ -197,11 +203,12 @@ for n in list(range(num_trades)):
         ticker = my_bittrex.get_ticker(market)
         price = ticker['result']['Last']
         amount = amount / price  # Convert to the amount of BTC
+
         if is_USD:  # buy
-            trade_result = my_bittrex.buy_limit(market, amount, price)
+            trade_result = my_bittrex.buy_limit(market, amount, round(price*1.0001, 3))
             side = 'buying'
         else:       # Sell
-            trade_result = my_bittrex.sell_limit(market, amount, price)
+            trade_result = my_bittrex.sell_limit(market, amount, round(price*0.9999, 3) )
             side = 'selling'
 
         # Check that an order was entered
@@ -210,7 +217,7 @@ for n in list(range(num_trades)):
             print(trade_result['message'])
             continue
 
-        print(f'Order for {side} {amount:.8f} {symbols[0:3]} at a price of {price:.2f} has been submitted to the market.')
+        print(f'Order for {side} {amount:.8f} {symbols[0:3]} at a price of {price:.3f} has been submitted to the market.')
         order_uuid = trade_result['result']['uuid']
 
         # Loop to see if the order has been filled
@@ -218,41 +225,48 @@ for n in list(range(num_trades)):
         cancel_result = False
         while is_open:
             order_data = my_bittrex.get_order(order_uuid)
-            is_open = order_data['result']['IsOpen']
+            try:
+                is_open = order_data['result']['IsOpen']
+            except TypeError:
+                print(is_open)
             # print('Order open status: ', is_open)
 
             if not is_open:
                 print(f'Order number {n+1} out of {num_trades} has been filled. Id: {order_uuid}.')
+                is_USD = not is_USD
+                trade_incomplete = False
                 break
 
             time.sleep(0.5)
             time_elapsed = datetime.now() - start_time
 
-            if time_elapsed > timedelta(seconds=10):
-                print('Order has not gone through in 10 seconds. Cancelling...')
+            time_limit = 30
+            if time_elapsed > timedelta(seconds=time_limit):
+                print(f'Order has not gone through in {time_limit} seconds. Cancelling...')
                 # Cancel the order
                 cancel_result = my_bittrex.cancel(order_uuid)['success']
                 if cancel_result == True:  # need to see if im checking if cancel_result exits or if im checking its value
                     print(f'Cancel status: {cancel_result} for order: {order_uuid}.')
-                    retries -= 1
+                    # retries -= 1
                     break
 
         if cancel_result == True:
             # if the order was cancelled, try again
-            print(f'Attempt number {3 - retries} was not filled. Attempting to order again. ')
-            continue
+            # print(f'Attempt number {3 - retries} was not filled. Attempting to order again. ')
+            print(f'Attempt was not filled. Attempting to order again.')
+            # continue
 
         dt = datetime.now() - start_time  # note that this include the time to run a small amount of code
 
-        order_data['result']['Order Duration'] = dt
+        try: #Some weird error here that I have not been able to recreate. Added print statements for debugging if it occurs again
+            order_data['result']['Order Duration'] = dt.total_seconds()
+        except TypeError:
+            print(dt)
+            print(dt.total_seconds())
         trade = process_order_data(order_data)
         log = log.append(trade, ignore_index=True)
         # log.reset_index(inplace=True)
 
-        is_USD = not is_USD
-
-    if retries <= 0:
-        break
 
 save_trade_data(log, paths)
 
