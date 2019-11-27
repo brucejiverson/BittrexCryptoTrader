@@ -4,7 +4,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
-import math
 
 from datetime import datetime, timedelta
 import json
@@ -12,7 +11,8 @@ import re
 import os
 import pickle
 import itertools
-import math
+from empyrical import sortino_ratio
+
 from statistics import mean
 
 from sklearn.preprocessing import StandardScaler
@@ -48,7 +48,7 @@ def get_candles(bittrex_obj, df, market, granularity):
 
     attempts = 0
     while True:
-        print('Fetching candles from Bittrex.')
+        print('Fetching candles from Bittrex...')
         candle_dict = bittrex_obj.get_candles(
             market, 'oneMin')
 
@@ -77,7 +77,7 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
     # this function is useful as code is ran for the same period in backtesting several times consecutively,
     # and fetching from original CSV takes longer as it is a much larger file
 
-    print('Fetching historical data.')
+    print('Fetching historical data...')
 
     # get the historic data
     path = path_dict['updated history']
@@ -102,7 +102,7 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
             print('Success fetching from cumulative data repository.')
             df = df.append(up_df)
 
-    if df.empty or df.Date.min() > start_date:
+    if df.empty or df.Date.min() > start_date:  #Fetch from download file (this is last because its slow)
 
         print('Fetching data from the download file.')
         # get the historic data
@@ -110,7 +110,8 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
         def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
         orig_df = pd.read_csv(path_dict['downloaded history'], usecols=['Timestamp', 'Close'], parse_dates=[
             'Timestamp'], date_parser=dateparse)
-        orig_df.rename(columns={'Timestamp': 'Date'}, inplace=True)
+        orig_df.rename(columns={'Timestamp': 'Date', 'Close': 'BTCUSD'}, inplace=True)
+
 
         assert not orig_df.empty
 
@@ -173,39 +174,61 @@ def save_historical_data(path_dict, df):
 
 def add_sma_as_column(df, p):
     # p is a number
-    array = df['BTCUSD'].values  # returns an np array
+    price = df['BTCUSD'].values  # returns an np price
 
-    sma = np.empty_like(array)
-    for i, item in enumerate(np.nditer(array)):
+    sma = np.empty_like(price)
+    for i, item in enumerate(np.nditer(price)):
         if i == 0:
             sma[i] = item
         elif i < p:
-            sma[i] = array[0:i].mean()
+            sma[i] = price[0:i].mean()
         else:
-            sma[i] = array[i - p:i].mean()
+            sma[i] = price[i - p:i].mean()
 
-    df['SMA_' + str(p)] = sma  # modifies the input df
+    # subtract
+    indicator = np.empty_like(sma)
+    for i, item in enumerate(np.nditer(price)):
+        indicator[i] = sma[i] - price[i]
 
-    # print(sma[0])
+    df['SMA_' + str(p)] = indicator  # modifies the input df
 
-# need a plot training results
-# plot testing results
-# plot running results
+# def add_features(df):
+
+    #add the momentum indicators
+
+def make_price_history_static(df):
+    # df['Static'] = np.log(df['BTCUSD']) - np.log(df['BTCUSD']).shift(1)
+    # df['Static'].iloc[0] = 0
+    df['Static'] = df['BTCUSD']
+    df = df[['Date', 'BTCUSD', 'Static']]
 
 
-def plot_history(df, return_on_investment=0, market_performance=0):
+def ROI(initial, final):
+    # Returns the percentage increase/decrease
+    return round(final / initial - 1, 4) * 100
+
+
+def plot_history(df, log, roi=0):
     # df = pd.DataFrame({'Date': data[:, 0], 'BTCUSD': np.float_(data[:, 1])})
 
     assert not df.empty
-    fig, ax = plt.subplots()  # Create the figure
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1)  # Create the figure
 
-    df.plot(x='Date', y='BTCUSD', ax=ax)
+    market_perf = ROI(df.BTCUSD.iloc[0], df.BTCUSD.iloc[-1])
+    fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+    df.plot(x='Date', y='BTCUSD', ax=ax1)
 
     for col in df.columns:
         if col[0:3] == 'SMA':
-            df.plot(x='Date', y=col, ax=ax)
+            df.plot(x='Date', y=col, ax=ax3)
 
     # df.plot(x='Date', y='Account Value', ax=ax)
+
+    log['Date'] = df.Date
+    # log.plot(x='Date', y='BTCUSD', ax=ax)
+    log.plot(x='Date', y='Value', ax=ax2)
+    # df.plot(x='Date', y='AccounV Value', ax=ax)
+
     bot, top = plt.ylim()
     cushion = 200
     plt.ylim(bot - cushion, top + cushion)
@@ -224,7 +247,7 @@ def get_scaler(env):
     states = []
     for _ in range(env.n_step):
         action = np.random.choice(env.action_space)
-        state, reward, done, info = env.step(action)
+        state, val, reward, done, info = env.step(action)
         states.append(state)
         if done:
             break
@@ -291,7 +314,8 @@ class LinearModel:
         self.W += self.vW
         self.b += self.vb
 
-        mse = np.mean((Yhat - Y)**2)  # Using the mean squared error
+        mse = np.mean((Yhat - Y)**2)  # Using the mean squared error (This was from the class code, started throwing runtime errors)
+        # mse = ((Yhat - Y)**2).mean(axis = None) #still throws run time errors
         self.losses.append(mse)
 
     def load_weights(self, filepath):
@@ -311,59 +335,53 @@ class SimulatedMarketEnv:
     The state size and the aciton size throughout the rest of this
     program are linked to this class.
 
-    State: vector of size 7 (n_asset * 2 + 1)
-      - # shares of asset 1 owned
-      - # shares of asset 2 owned
-      - # shares of asset 3 owned
-      - price of asset 1 (using BTCUSD price)
-      - price of asset 2
-      - price of asset 3
-      - cash owned (can be used to purchase more assets, USD)
-
-    Action: categorical variable with 27 (3^3) possibilities
-      - for each stock, you can:
-      - 0 = sell
-      - 1 = hold
-      - 2 = buy
+    State: vector of size 7 (n_asset + n_asset*n_indicators)
+      - static price of asset 1 (using BTCUSD price)
+      - associated indicators for each asset
     """
 
     def __init__(self, data, initial_investment=100):
         # data
-        self.asset_price_history = data
-        self.n_indicators = 1
+        self.asset_data = data
+        self.n_indicators = 3
 
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
-        self.n_step, self.n_asset = self.asset_price_history.shape
+        self.n_step, self.n_asset = self.asset_data.shape
         # for now this works but will need to be updated when multiple assets are added
-        self.n_asset -= self.n_indicators
+        self.n_asset -= self.n_indicators + 1
         # instance attributes
         self.initial_investment = initial_investment
         self.cur_step = None
-        self.asset_owned = None
-        self.asset_price = None
-        self.asset_indicators = None
+        self.assets_owned = None
+        self.asset_prices = None
+        self.cur_state = None
+        # self.cur_position = None
         self.cash_in_hand = None
 
         # Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
 
-        self.min_trade_spacing = 10  # The number of datapoints that must occur between trades
+        self.min_trade_spacing = 1  # The number of datapoints that must occur between trades
         self.period_since_trade = self.min_trade_spacing
 
         portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset
         # The possible portions of the portfolio that could be allocated to a single asset
         possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
-
-        # calculate all possible allocations of wealth across the available
+        # calculate all possible allocations of wealth across the available assets
         self.action_list = []
         permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
+        #Only include values that are possible (can't have more than 100% of the portfolio)
         for i, item in enumerate(permutations_list):
             if sum(item) <= 1:
                 self.action_list.append(item)
 
+        #This list is for indexing each of the actions
         self.action_space = np.arange(len(self.action_list))
 
         # calculate size of state (amount of each asset held, value of each asset, cash in hand)
-        self.state_dim = self.n_asset * 2 + 1 + self.n_indicators
+        self.state_dim = self.n_asset + self.n_indicators*self.n_asset   #State is the static data and the indicators for each asset (currently ignoring volume)
+
+        # self.rewards_hist_len = 10
+        # self.rewards_hist = np.ones(self.rewards_hist_len)
 
         self.last_action = []
         self.reset()
@@ -372,44 +390,59 @@ class SimulatedMarketEnv:
         # Resets the environement to the initial state
         self.cur_step = 0  # point to the first datetime in the dataset
         # Own no assets to start with
-        self.asset_owned = np.zeros(self.n_asset)
-
-        """ the data, for asset_price_history can be thought of as nested arrays, where indexing the
+        self.assets_owned = np.zeros(self.n_asset)
+        self.last_action = self.action_list[0] #The action where nothing is owned
+        """ the data, for asset_data can be thought of as nested arrays, where indexing the
         highest order array gives a snapshot of all data at a particular time, and information at the point
         in time can be captured by indexing that snapshot."""
-        self.asset_price = self.asset_price_history[self.cur_step][0:self.n_asset]
-        self.asset_indicators = self.asset_price_history[self.cur_step][self.n_asset:(self.n_asset + self.n_indicators)]
+        self.asset_prices = self.asset_data[self.cur_step][0:self.n_asset]
+        self.cur_state = self.asset_data[self.cur_step][self.n_asset:]#(self.n_asset + self.n_indicators)]
+
+        self.cur_position = self._update_pos()
 
         self.cash_in_hand = self.initial_investment
-        return self._get_obs()  # Return the state vector (same as obervation for now)
+
+        # print(self.cur_state)
+        # print(self.asset_prices)
+        # print(self.n_asset)
+        # print('reset')
+        # time.sleep(100)
+
+        return self.cur_state, self._get_val() # Return the state vector (same as obervation for now)
 
     def step(self, action):
         # Performs an action in the enviroment, and returns the next state and reward
+
         if not action in self.action_space:
             print(action)
             print(self.action_space)
-        assert action in self.action_space  # Check that a valid action was passed
+            assert action in self.action_space  # Check that a valid action was passed
 
         # get current value before performing the action
         prev_val = self._get_val()
-
+        prev_price = self.asset_prices[0]
         # update price, i.e. go to the next day
         self.cur_step += 1
 
-        """ the data, for asset_price_history can be thought of as nested arrays, where indexing the
+        """ the data, for asset_data can be thought of as nested arrays, where indexing the
         highest order array gives a snapshot of all data at a particular time, and information at the point
         in time can be captured by indexing that snapshot."""
-        self.asset_price = self.asset_price_history[self.cur_step][0:self.n_asset]
-        self.asset_indicators = self.asset_price_history[self.cur_step][self.n_asset:(self.n_asset + self.n_indicators)]
+        self.asset_prices = self.asset_data[self.cur_step][0:self.n_asset]
+        self.cur_state = self.asset_data[self.cur_step][self.n_asset:]
 
         # perform the trade
         self._trade(action)
+        self._update_pos()
 
         # get the new value after taking the action
         cur_val = self._get_val()
-
+        cur_price = self.asset_prices[0]
         # reward is the increase in porfolio value
-        reward = (cur_val - prev_val) / prev_val
+        delta = (cur_price - prev_price)/prev_price #Percentage change in price
+        reward = delta*(self.assets_owned[0]*self.asset_prices[0] - self.cash_in_hand)/cur_val
+        # self.rewards_hist = np.roll(self.rewards_hist,1)
+        # self.rewards_hist[0] = step_return
+        # reward = sortino_ratio(self.rewards_hist)
 
         # done if we have run out of data
         done = self.cur_step == self.n_step - 1
@@ -419,182 +452,56 @@ class SimulatedMarketEnv:
 
         # conform to the Gym API
         #      next state       reward  flag  info dict.
-        return self._get_obs(), reward, done, info
+        return self.cur_state, self._get_val(), reward, done, info
 
-    def _get_obs(self):
+    def _update_pos(self):
         # Returns the state (for now state, and observation are the same.
         # Note that the state could be a transformation of the observation, or
         # multiple past observations stacked.)
+        self.cur_position = np.empty(self.n_asset + 1)  #assets_owned, USD
+        # self.cur_position[0:self.n_asset] = self.asset_prices
+        self.cur_position[0:self.n_asset] = self.assets_owned
+        self.cur_position[-1] = self.cash_in_hand
 
-        obs = np.empty(self.state_dim)
-
-        # How many of each asset are owned
-        obs[:self.n_asset] = self.asset_owned
-        # Value of each stock
-        obs[self.n_asset:2 * self.n_asset] = self.asset_price
-        # indicators associated with each stock
-        obs[2*self.n_asset:(2*self.n_asset + self.n_indicators)] = self.asset_indicators
-        obs[-1] = self.cash_in_hand
-        # if self.cur_step == 1:
-        #     print(obs)
-        return obs
 
     def _get_val(self):
-        return self.asset_owned.dot(self.asset_price) + self.cash_in_hand
+        return self.assets_owned.dot(self.asset_prices) + self.cash_in_hand
 
     def _trade(self, action):
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
+
         action_vec = self.action_list[action]
 
         if action_vec != self.last_action and self.period_since_trade >= self.min_trade_spacing:  # if attmepting to change state
+
+            #Calculate the changes needed for each asset
+            delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
+
+            #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
+            #First fulfill the required USD
+            val = self._get_val()
+
+            # for i, d in enumerate(delta):
+            # self.assets_owned[0]  += delta[0]*val*self.asset_prices[0]
+            # self.cash_in_hand -= delta[0]*val
+
+
             # Sell everything
             for i, a in enumerate(action_vec):
-                self.cash_in_hand += self.asset_owned[i] * self.asset_price[i]
-                self.asset_owned[i] = 0
+                self.cash_in_hand += self.assets_owned[i] * self.asset_prices[i]
+                self.assets_owned[i] = 0
 
             # Buy back the right amounts
             for i, a in enumerate(action_vec):
                 cash_to_use = a * self.cash_in_hand
-                self.asset_owned[i] = cash_to_use / self.asset_price[i]
+                self.assets_owned[i] = cash_to_use / self.asset_prices[i]
                 self.cash_in_hand -= cash_to_use
 
             self.last_action = action_vec
             self.period_since_trade = 0
         else:
             self.period_since_trade += 1
-
-
-class RealMarketEnv:
-    """
-    A multi-asset trading environment.
-    For now this has been adopted for only one asset.
-    Below shows how to add more.
-    The state size and the aciton size throughout the rest of this
-    program are linked to this class.
-
-    State: vector of size 7 (n_asset * 2 + 1)
-      - # shares of asset 1 owned
-      - # shares of asset 2 owned
-      - # shares of asset 3 owned
-      - price of asset 1 (using BTCUSD price)
-      - price of asset 2
-      - price of asset 3
-      - cash owned (can be used to purchase more assets, USD)
-
-    Action: categorical variable with 27 (3^3) possibilities
-      - for each stock, you can:
-      - 0 = sell
-      - 1 = hold
-      - 2 = buy
-    """
-
-    def __init__(self, bittrex_obj):
-        # data
-        self.asset_price_history = data
-
-        self.n_asset = self.asset_price_history.shape
-        # instance attributes
-        self.initial_investment = 0  # read from bittrex
-        self.cur_step = None
-        self.asset_owned = None
-        self.asset_price = None
-        self.cash_in_hand = None
-
-        portfolio_granularity = .1  # smallest fraction of portfolio for investment in single asset
-        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
-
-        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
-
-        self.action_list = []
-        for i, item in enumerate(permutations_list):
-            if sum(item) <= 1:
-                self.action_list.append(item)
-
-        self.action_space = np.arange(len(self.action_list))
-
-        # calculate size of state (amount of each asset held, value of each asset, cash in hand)
-        self.state_dim = self.n_asset * 2 + 1
-
-        self.last_action = []
-        self.reset()
-
-    def reset(self):
-        # Resets the environement to the initial state
-        self.cur_step = 0  # point to the first datetime in the dataset
-        # Own no assets to start with
-        self.asset_owned = np.zeros(self.n_asset)
-        self.asset_price = self.asset_price_history[self.cur_step]
-        self.cash_in_hand = self.initial_investment
-        return self._get_obs()  # Return the state vector (same as obervation for now)
-
-    def step(self, action):
-        # Performs an action in the enviroment, and returns the next state and reward
-        assert action in self.action_space  # Check that a valid action was passed
-
-        # get current value before performing the action
-        prev_val = self._get_val()
-
-        # update price, i.e. go to the next day
-        self.cur_step += 1
-        self.asset_price = self.asset_price_history[self.cur_step]
-
-        # perform the trade
-        self._trade(action)
-
-        # get the new value after taking the action
-        cur_val = self._get_val()
-
-        # reward is the increase in porfolio value
-        reward = cur_val - prev_val
-
-        # done if we have run out of data
-        done = self.cur_step == self.n_step - 1
-
-        # store the current value of the portfolio here
-        info = {'cur_val': cur_val}
-
-        # conform to the Gym API
-        #      next state       reward  flag  info dict.
-        return self._get_obs(), reward, done, info
-
-    def _get_obs(self):
-        # Returns the state (for now state, and observation are the same.
-        # Note that the state could be a transformation of the observation, or
-        # multiple past observations stacked.)
-
-        # get the latest candle data
-        # get the amount owned of the assets
-        # get the USD owned
-
-        obs = np.empty(self.state_dim)
-        # How many of each asset are owned
-        obs[:self.n_asset] = self.asset_owned
-        # Value of each stock
-        obs[self.n_asset:2 * self.n_asset] = self.asset_price
-        obs[-1] = self.cash_in_hand
-        return obs
-
-    def _get_val(self):
-        return self.asset_owned.dot(self.asset_price) + self.cash_in_hand
-
-    def _trade(self, action):
-        # index the action we want to perform
-        # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
-        action_vec = self.action_list[action]
-        if action_vec != self.last_action:  # if attmepting to change state
-            # Sell everything
-            for i, a in enumerate(action_vec):
-                self.cash_in_hand += self.asset_owned[i] * self.asset_price[i]
-                self.asset_owned[i] = 0
-
-            # Buy back the right amounts
-            for i, a in enumerate(action_vec):
-                cash_to_use = a * self.cash_in_hand
-                self.asset_owned[i] = cash_to_use / self.asset_price[i]
-                self.cash_in_hand -= cash_to_use * (1 + .0025)
-
-            self.last_action = action_vec
 
 
 class DQNAgent(object):
@@ -610,8 +517,8 @@ class DQNAgent(object):
 
         self.gamma = 0.95  # discount rate
         self.epsilon = 1.0  # exploration rate
-        self.epsilon_min = 0.001  # originally .01
-        self.epsilon_decay = 0.99  # originall .995
+        self.epsilon_min = 0.15  # originally .01. The version here is set for training
+        self.epsilon_decay = 0.9995  # originall .995
         # Get an instance of our model
         self.model = LinearModel(state_size, action_size)
 
@@ -651,14 +558,14 @@ class DQNAgent(object):
 
 def play_one_episode(agent, env, scaler, is_train, record=False):
     # note: after transforming states are already 1xD
-    log_columns = ['BTC', 'BTCUSD', 'USD']
+    log_columns = ['Value']
     log = pd.DataFrame(columns=log_columns)
 
-    state = env.reset()
+    state, val  = env.reset()
 
     if record == True:
         log = log.append(pd.DataFrame.from_records(
-            [dict(zip(log_columns, state))]), ignore_index=True)
+            [dict(zip(log_columns, [val]))]), ignore_index=True)
 
     state = scaler.transform([state])
     done = False
@@ -666,13 +573,12 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
     while not done:
 
         action = agent.act(state)
-        next_state, reward, done, info = env.step(action)
+        next_state, val, reward, done, info = env.step(action)
 
         if record == True:
             log = log.append(pd.DataFrame.from_records(
-                [dict(zip(log_columns, next_state))]), ignore_index=True)
+                [dict(zip(log_columns, [val]))]), ignore_index=True)
 
-        save = next_state
         next_state = scaler.transform([next_state])
         if is_train in ['train', 'add_train']:
             agent.train(state, action, reward, next_state, done)
@@ -684,7 +590,7 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
         return info['cur_val']
 
 
-def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
+def run_agent(mode, df, bittrex_obj, path_dict, symbols='USDBTC'):
     # Mode should be a string, either train or test or run
     # maybe it would be helpful to run this through command line argv etc
     models_folder = path_dict['models']
@@ -696,21 +602,23 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
     # variable for storing final value of the portfolio (done at end of episode)
     portfolio_value = []
 
+    data_to_fit = df.drop('Date', axis = 1).values
+
     def return_on_investment(final, initial):
         # Returns the percentage increase/decrease
         return round(final / initial - 1, 4) * 100
 
+    # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
+
+    num_episodes = 50
+    batch_size = 32  # sampleing from replay memory
+    initial_investment = 100
+    # fees = 0.0025  # standard fees are 0.3% per transaction
+
     if mode in ['train', 'test', 'add_train']:
 
-        # n_train = n_timesteps // 2 #floor division splitting the data into training and testing
 
-        num_episodes = 3500
-        batch_size = 32  # sampleing from replay memory
-        initial_investment = 1000
-        # fees = 0.0025  # standard fees are 0.3% per transaction
-
-        n_timesteps, n_stocks = data.shape
-        sim_env = SimulatedMarketEnv(data, initial_investment)
+        sim_env = SimulatedMarketEnv(data_to_fit, initial_investment)
         state_size = sim_env.state_dim
         action_size = len(sim_env.action_space)
         agent = DQNAgent(state_size, action_size)
@@ -718,14 +626,15 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
         if mode == 'test':
             print('Testing...')
-            num_episodes = 50
+            num_episodes = 2
             # then load the previous scaler
             with open(f'{models_folder}/scaler.pkl', 'rb') as f:
                 my_scaler = pickle.load(f)
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon = 0
+            agent.epsilon_min = 0
+            agent.epsilon = agent.epsilon_min
 
             # load trained weights
             agent.load(f'{models_folder}/linear.npz')
@@ -736,14 +645,20 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
             # load trained weights
             agent.load(f'{models_folder}/linear.npz')
+            print('Last scalar and trained weights loaded.')
 
-        end_time = timedelta(hours=0)
+        time_remaining = timedelta(hours=0)
 
         # play the game num_episodes times
         for e in range(num_episodes):
+
+            if e == range(num_episodes)[-1]:        #Setting this so that the very last playthrough is purely deterministic
+                agent.epsilon_min = 0
+                agent.epsilon = agent.epsilon_min
+
             t0 = datetime.now()
 
-            if e == num_episodes - 1 and mode == 'test':
+            if e == num_episodes - 1:
                 val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
             else:
                 val = play_one_episode(agent, sim_env, my_scaler, mode)
@@ -752,37 +667,28 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
             # if not end_time in locals():    #initialize with a direct calculation
             #     end_time = dt* (num_episodes - e)
             # else:
-            end_time -= dt
-            end_time = end_time + (dt * (num_episodes - (e + 1)) - end_time) / (e + 1)
+            time_remaining -= dt
+            time_remaining = time_remaining + \
+                (dt * (num_episodes - (e + 1)) - time_remaining) / (e + 1)
 
-            if num_episodes <= 1000 or e % 10 == 0:
-                print(
-                    f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f}, timeremaining: {end_time}")
+            if num_episodes <= 500 or e % 10 == 0:
+                print(f"episode: {e + 1}/{num_episodes}, episode end value: {val:.2f}, episode roi: {roi:.2f}, end time: {(datetime.now() + time_remaining).time()}")
             portfolio_value.append(val)  # append episode end portfolio value
 
         # save the weights when we are done
         if mode in ['train', 'add_train']:
             # save the DQN
             agent.save(f'{models_folder}/linear.npz')
+            print('DQN saved.')
 
+            print('Saving scaler...')
             # save the scaler
             with open(f'{models_folder}/scaler.pkl', 'wb') as f:
                 pickle.dump(my_scaler, f)
-
+            print('Scaler saved.')
             # plot losses
             plt.plot(agent.model.losses)
             plt.show()
-
-            state_log = pd.DataFrame()
-        elif mode == 'test':
-            # add a value column
-            values = []
-            for i, row in state_log.iterrows():
-                asset_owned = row.BTC
-                asset_price = row.BTCUSD
-                cash = row.USD
-                values.append(asset_owned * asset_price + cash)
-            state_log['Value'] = values
 
         # save portfolio value for each episode
         print('Saving rewards...')
@@ -794,7 +700,6 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
     else:
         assert(mode == 'run')
 
-        trade_log = pd.DataFrame(columns=['Date', 'BTCUSD', 'Symbol'])
         my_balance = bittrex_obj.get_balance('BTC')
 
         # load the previous scaler
@@ -803,7 +708,7 @@ def run_agent(mode, data, bittrex_obj, path_dict, symbols='USDBTC'):
 
         # make sure epsilon is not 1!
         # Set to 0 for purely deterministic
-        agent.epsilon = 0.01
+        agent.epsilon = agent.epsilon_min
 
         # load trained weights
         agent.load(f'{models_folder}/linear.npz')

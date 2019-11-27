@@ -40,36 +40,32 @@ my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
 market = symbols[3:6] + '-' + symbols[0:3]
 
-mode = 'test'
 
-if mode in ['train', 'add_train']:
-    #train
-    # start = datetime(2019,11, 8)
-    # end = datetime(2019,11,18)
-    start = datetime(2017,12, 1)
-    end = datetime(2018, 1, 1)
-    # end = datetime.now() - timedelta(hours = 6)
+# start = datetime(2012,1, 1)
+# end = datetime.now() - timedelta(hours = 1)
 
-else:
-    assert(mode == 'test')  #make sure that a proper mode was passed
-    #test
-    # start = datetime(2019,11, 8)
-    # end = datetime(2019, 11, 18)
-    start = datetime(2019,11, 18)
-    end = datetime.now() - timedelta(hours = 1)
+start = datetime(2017,1, 1)
+end = datetime(2017, 3, 1)
 
-df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldestq date info
+df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
+
 # save_historical_data(paths, df)
 
-# print('Historical data has been fetched, updated, and resaved.')
+print('Historical data has been fetched, updated, and resaved.')
 
-base = 75
-make_price_history_static(df)
-add_sma_as_column(df, base)
-add_sma_as_column(df, int(base*8/5))
-add_sma_as_column(df, int(base*13/5))
 
-state_log = run_agent(mode, df, my_bittrex, paths)
-# else:
-plot_history(df, state_log)
-# roi = backtest(data, start, end, extrema_filter)
+print(df.head())
+
+# assert not df.empty
+# fig, ax = plt.subplots(1, 1)  # Create the figure
+#
+# market_perf = ROI(df.BTCUSD.iloc[0], df.BTCUSD.iloc[-1])
+# fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+# df.plot(x='Date', y='BTCUSD', ax=ax)
+#
+#
+# bot, top = plt.ylim()
+# cushion = 200
+# plt.ylim(bot - cushion, top + cushion)
+# fig.autofmt_xdate()
+# plt.show()
