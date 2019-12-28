@@ -45,7 +45,7 @@ market = symbols[3:6] + '-' + symbols[0:3]
 # end = datetime.now() - timedelta(hours = 1)
 
 start = datetime(2017,1, 1)
-end = datetime(2017, 3, 1)
+end = datetime(2019, 12, 21)
 
 df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
 
@@ -54,18 +54,18 @@ df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date
 print('Historical data has been fetched, updated, and resaved.')
 
 
-print(df.head())
+# print(df.head())
 
-# assert not df.empty
-# fig, ax = plt.subplots(1, 1)  # Create the figure
-#
-# market_perf = ROI(df.BTCUSD.iloc[0], df.BTCUSD.iloc[-1])
-# fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-# df.plot(x='Date', y='BTCUSD', ax=ax)
-#
-#
-# bot, top = plt.ylim()
-# cushion = 200
-# plt.ylim(bot - cushion, top + cushion)
-# fig.autofmt_xdate()
-# plt.show()
+assert not df.empty
+fig, ax = plt.subplots(1, 1)  # Create the figure
+
+market_perf = ROI(df.BTCClose.iloc[0], df.BTCClose.iloc[-1])
+fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+df.plot(x='Date', y='BTCClose', ax=ax)
+
+
+bot, top = plt.ylim()
+cushion = 200
+plt.ylim(bot - cushion, top + cushion)
+fig.autofmt_xdate()
+plt.show()

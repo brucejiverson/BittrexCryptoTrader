@@ -23,13 +23,18 @@ elif os == 'windows':
              'models': 'agent_models',
              'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
 
-orig_path = paths['downloaded history']
 
 def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-orig_df = pd.read_csv(paths['downloaded history'], usecols=['Timestamp', 'Close'], parse_dates=[
+orig_df = pd.read_csv(paths['downloaded history'], usecols=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
     'Timestamp'], date_parser=dateparse)
-orig_df.rename(columns={'Timestamp': 'Date', 'Close': 'BTCUSD'}, inplace=True)
+orig_df.rename(columns={'Timestamp': 'Date', 'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}, inplace=True)
+
+orig_df = format_df(orig_df)
+
 
 # save_historical_data(paths, orig_df)  #just use this line if you want to paste in data.
 
 #Use the below to purge and overwrite the data
+
+orig_df['Date'] = orig_df['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
+orig_df.to_csv(paths['updated history'], index=False)

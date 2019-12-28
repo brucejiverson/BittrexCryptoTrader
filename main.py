@@ -31,45 +31,26 @@ elif os == 'windows':
 else:
     print('Unknown OS passed when defining the paths')  # this should throw and error
 
-#get my keys
-with open(paths['secret']) as secrets_file:
-    keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
-    secrets_file.close()
 
-my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
-
-market = symbols[3:6] + '-' + symbols[0:3]
-
-mode = 'test'
+mode = 'train'
 
 if mode in ['train', 'add_train']:
     #train
     # start = datetime(2019,11, 8)
     # end = datetime(2019,11,18)
-    start = datetime(2017,12, 1)
-    end = datetime(2018, 1, 1)
+    start = datetime(2019,12, 14)
+    end = datetime(2019, 12, 28)
     # end = datetime.now() - timedelta(hours = 6)
 
 else:
     assert(mode == 'test')  #make sure that a proper mode was passed
     #test
-    # start = datetime(2019,11, 8)
-    # end = datetime(2019, 11, 18)
-    start = datetime(2019,11, 18)
-    end = datetime.now() - timedelta(hours = 1)
+    # start = datetime(2018,1, 1)
+    # end = datetime(2018, 3, 1)
+    start = datetime(2019,12, 14)
+    end = datetime(2019, 12, 27)
+    # start = datetime(2017,11, 1)
+    # end = datetime(2018, 1, 1)
 
-df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldestq date info
-# save_historical_data(paths, df)
 
-# print('Historical data has been fetched, updated, and resaved.')
-
-base = 75
-make_price_history_static(df)
-add_sma_as_column(df, base)
-add_sma_as_column(df, int(base*8/5))
-add_sma_as_column(df, int(base*13/5))
-
-state_log = run_agent(mode, df, my_bittrex, paths)
-# else:
-plot_history(df, state_log)
-# roi = backtest(data, start, end, extrema_filter)
+run_agent(mode, paths, start, end)

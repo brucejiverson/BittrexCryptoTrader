@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-mode = 'train'
+mode = 'test'
 
 a = np.load(f'agent_rewards/{mode}.npy')
 
