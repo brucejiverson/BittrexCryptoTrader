@@ -44,8 +44,8 @@ market = symbols[3:6] + '-' + symbols[0:3]
 # start = datetime(2012,1, 1)
 # end = datetime.now() - timedelta(hours = 1)
 
-start = datetime(2017,1, 1)
-end = datetime(2019, 12, 21)
+start = datetime(2016,1, 1)
+end = datetime.now()
 
 df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
 

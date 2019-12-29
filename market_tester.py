@@ -15,7 +15,6 @@ paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data
          'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
 
 bittrex_market = BittrexMarketEnv(5)
-bittrex_market.reset()
 
 num_trades = 5
 
