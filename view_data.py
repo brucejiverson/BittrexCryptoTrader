@@ -44,17 +44,16 @@ market = symbols[3:6] + '-' + symbols[0:3]
 # start = datetime(2012,1, 1)
 # end = datetime.now() - timedelta(hours = 1)
 
-start = datetime(2016,1, 1)
+start = datetime(2016, 1, 1)
 end = datetime.now()
 
 df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
 
-# save_historical_data(paths, df)
+save_historical_data(paths, df)
+
 
 print('Historical data has been fetched, updated, and resaved.')
 
-
-# print(df.head())
 
 assert not df.empty
 fig, ax = plt.subplots(1, 1)  # Create the figure
