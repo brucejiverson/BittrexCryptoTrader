@@ -17,7 +17,7 @@ if os == 'linux':
              'secret': "/home/bruce/Documents/crypto_data/secrets.json",
              'rewards': 'agent_rewards',
              'models': 'agent_models',
-             'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
+              'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
 
     # TODO: add a loop here that appends the asset folders
 

@@ -107,6 +107,9 @@ def format_df(input_df):
     input_df.drop_duplicates(subset='Date', inplace=True)
     input_df.sort_values(by='Date', inplace=True)   #This was causing a warning about future deprecation/changes to pandas
 
+    input_df.drop_duplicates(subset='Date', inplace=True)
+    input_df = input_df[input_df['BTCClose'].notnull()]  # Remove non datapoints from the set
+    input_df.sort_values(by='Date', inplace=True)
     input_df.reset_index(inplace=True, drop=True)
     input_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
 
@@ -283,6 +286,7 @@ def add_sma_as_column(input_df, p):
         else:
             sma[i] = price[i - p:i].mean() - price[i - p-1:i-1].mean()
 
+
     col = 'SMA_' + str(p)
     # df_col = pd.Series(data = sma)
     input_df[col] = sma  # modifies the input df
@@ -293,6 +297,12 @@ def add_features(input_df):
     # input_df = add_sma_as_column(input_df, base)
     # input_df = add_sma_as_column(input_df, int(base*8/5))
     input_df = add_sma_as_column(input_df, int(base*13/5))
+    # subtract
+    indicator = np.empty_like(sma)
+    for i, item in enumerate(np.nditer(price)):
+        indicator[i] = sma[i] - price[i]
+
+    df['SMA_' + str(p)] = indicator  # modifies the input df
 
     input_df['BTCMACD'] = ta.trend.macd_diff(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = ta.momentum.rsi(input_df['BTCClose'], fillna  = True)
@@ -301,6 +311,20 @@ def add_features(input_df):
     # print(input_df.head())
 
     return input_df
+
+
+
+def make_static(df):
+    new_df = pd.DataFrame(columns = df.columns)
+
+    for col in df.columns:
+        if col == 'Date':
+            continue
+
+        new_df[col] = np.log(df['BTCClose']) - np.log(df['BTCClose']).shift(1)
+        new_df[col].iloc[0] = 0
+
+    return new_df
 
 
 def plot_data(df):
@@ -398,9 +422,10 @@ class LinearModel:
         assert(len(X.shape) == 2)
         return X.dot(self.W) + self.b
 
+
     def sgd(self, X, Y, learning_rate=0.0075, momentum=0.9):
+    def sgd(self, X, Y, learning_rate=0.01, momentum=0.9):
         """One step of gradient descent.
-        learning rate was originally 0.01
         u = momentum term
         n = learning rate
         g(t) = gradient
@@ -585,6 +610,7 @@ class SimulatedMarketEnv:
         state[self.n_asset] = self.USD     #This is set in trade
         # Asset data is amount btc price, usd, volume, indicators
 
+
         #Make data static
         full_slice = self.asset_data[self.cur_step]
         # print(full_slice)
@@ -619,6 +645,24 @@ class SimulatedMarketEnv:
         indexs = [self.n_asset + 1, self.n_asset +1 + len(full_slice)]  #good
         state[indexs[0]:indexs[1]] = state_slice   #Taken from data
         # print(state)
+        if self.cur_step == 0:
+            static_slice = np.zeros(len(self.asset_data[0]))
+        else:
+            slice = self.asset_data[self.cur_step]
+            last_slice = self.asset_data[self.cur_step - 1]
+            static_slice = np.log(slice) - np.log(last_slice)
+
+        state[self.n_asset+1:(self.n_asset*2 + 2 + self.n_indicators*self.n_asset)] =  static_slice   #Taken from data
+        # state =  self.asset_data[self.cur_step]   #Taken from data
+        # last_index = self.cur_step
+        # if last_index < 0:
+        #     last_index = 0
+        # last_price = self.asset_data[last_index][0]
+        # last_vol = self.asset_data[last_index][1]
+        #
+        # state[0] = state[0]/last_price
+        # state[1] = state[1]/last_vol
+        print(state)
         return state
 
     def _get_val(self):
@@ -674,7 +718,7 @@ class BittrexMarketEnv:
       - associated indicators for each asset
     """
 
-    def __init__(self, path_dict, initial_investment=10):
+    def __init__(self, initial_investment=10):
 
         #get my keys
         with open("/Users/biver/Documents/crypto_data/secrets.json") as secrets_file:
@@ -694,6 +738,7 @@ class BittrexMarketEnv:
         self.asset_prices = None
         self.asset_volumes = None
         self.USD = None
+
         self.path_dict = path_dict
 
         self.markets = ['USD-BTC', 'USD-ETH', 'USD-XMR']    #Alphabetical
@@ -702,6 +747,9 @@ class BittrexMarketEnv:
         self.df = self._fetch_candle_data(self.markets[0], now - timedelta(minutes = 100), now)
         print(self.df.tail())
         self._calculate_indicators()
+
+        self.markets = ['USD-BTC']
+
 
         portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset
         # The possible portions of the portfolio that could be allocated to a single asset
@@ -733,9 +781,7 @@ class BittrexMarketEnv:
 
         #Put all money into USD
         if self.assets_owned[0] > 0:
-            sucess = False
-            while not success:
-                success = self._trade(-self.assets_owned[0])
+            self._trade(-self.assets_owned[0])
 
 
         self.assets_owned = np.zeros(self.n_asset)
@@ -801,6 +847,7 @@ class BittrexMarketEnv:
                 if check1:
                     break
 
+
         print('Fetching prices.')
         while True:
             ticker = self.bittrex_obj_1_1.get_ticker('USD-BTC')
@@ -855,8 +902,33 @@ class BittrexMarketEnv:
         slice = self.df.iloc[[-1]] #This should be close, volumes, indicators
         slice = slice.drop('Date', axis = 1).values[0]
 
+
         last_slice = self.df.iloc[[-2]]
         last_slice = last_slice.drop('Date', axis = 1).values[0]
+    def _get_prices(self):
+        print('Fetching prices.')
+        while True:
+            ticker = self.bittrex_obj_1_1.get_ticker('USD-BTC')
+            #Change this to make sure that the check went through
+            # Check that an order was entered
+            if not ticker['success']:
+                print('_get_prices failed. Trying again. Ticker message: ')
+                print(ticker['message'])
+                time.sleep(1)
+            else:
+                break
+
+        self.asset_prices = [ticker['result']['Last']]
+
+
+    def _get_balances(self):
+        print('Fetching account balances.')
+        self.assets_owned = np.zeros(self.n_asset)
+        while True:
+            check1 = False
+            balance_response = self.bittrex_obj_1_1.get_balance('BTC')
+            if balance_response['success']:
+                self.assets_owned[0] = balance_response['result']['Balance']
 
         stationary_slice = np.log(slice) - np.log(last_slice)
 
@@ -869,6 +941,7 @@ class BittrexMarketEnv:
         self._get_obs()
         print(self.asset_prices, self.assets_owned, self.USD)
         return self.assets_owned.dot(self.asset_prices) + self.USD
+
 
 
     def _fetch_candle_data(self, market, start_date, end_date):
@@ -949,6 +1022,7 @@ class BittrexMarketEnv:
 
 
     def _cancel_all_orders(self):
+    def cancel_all_orders(self):
         print('Canceling all orders.')
         open_orders = self.bittrex_obj_1_1.get_open_orders('USD-BTC')
         if open_orders['success']:
@@ -965,53 +1039,6 @@ class BittrexMarketEnv:
             print('Failed to get order history.')
             print(result)
 
-
-    def _trade(self, amount):
-        #amount in USD
-
-        #For now, assuming bitcoin
-        #First fulfill the required USD
-        self._get_obs()
-
-        # Note that bittrex exchange is based in GMT 8 hours ahead of CA
-
-        start_time = datetime.now()
-
-        # amount = amount / self.asset_prices  # Convert to the amount of BTC
-
-        # Enter a trade into the market.
-        # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
-        if amount > 0:  # buy
-            trade_result = self.bittrex_obj_1_1.buy_limit(self.markets[0], amount, self.asset_prices[0])
-            side = 'buying'
-        else:       # Sell
-            trade_result = self.bittrex_obj_1_1.sell_limit(self.markets[0], -amount, self.asset_prices[0])
-            side = 'selling'
-
-        # Check that an order was entered
-        if not trade_result['success']:
-            print('Trade attempt failed')
-            print(trade_result['message'])
-            return False
-        else:
-            print(f'Order for {side} {amount:.8f} {self.markets[4:6]} at a price of {self.asset_prices[0]:.2f} has been submitted to the market.')
-            order_uuid = trade_result['result']['uuid']
-
-            # Loop for a time to see if the order has been filled
-            status = self._is_trade_executed(order_uuid)
-
-            if status == True:
-                print(f'Order has been filled. Id: {order_uuid}.')
-                return True
-            else:
-                print('Order not filled')
-                return False
-
-                dt = datetime.now() - start_time  # note that this include the time to run a small amount of code
-
-                order_data['result']['Order Duration'] = dt
-                trade = process_order_data(order_data)
-                # print(trade)
 
     def _is_trade_executed(self, uuid):
         start_time = datetime.now()
@@ -1045,6 +1072,54 @@ class BittrexMarketEnv:
                     return False
                     break #Break out of order status loop
                 print(cancel_result)
+
+
+    def _trade(self, amount):
+        #amount in USD
+
+        #For now, assuming bitcoin
+        #First fulfill the required USD
+        self._get_obs()
+
+        # Note that bittrex exchange is based in GMT 8 hours ahead of CA
+
+        start_time = datetime.now()
+
+        # amount = amount / self.asset_prices  # Convert to the amount of BTC
+
+        # Enter a trade into the market.
+        # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
+        if amount > 0:  # buy
+          trade_result = self.bittrex_obj_1_1.buy_limit(self.markets[0], amount, self.asset_prices[0])
+          side = 'buying'
+        else:       # Sell
+          trade_result = self.bittrex_obj_1_1.sell_limit(self.markets[0], -amount, self.asset_prices[0])
+          side = 'selling'
+
+        # Check that an order was entered
+        if not trade_result['success']:
+          print('Trade attempt failed')
+          print(trade_result['message'])
+          return False
+        else:
+            print(f'Order for {side} {amount:.8f} {self.markets[4:6]} at a price of {self.asset_prices[0]:.2f} has been submitted to the market.')
+            order_uuid = trade_result['result']['uuid']
+
+            # Loop for a time to see if the order has been filled
+            status = self._is_trade_executed(order_uuid)
+
+            if status == True:
+                print(f'Order has been filled. Id: {order_uuid}.')
+                return True
+            else:
+                print('Order not filled')
+                return False
+
+            dt = datetime.now() - start_time  # note that this include the time to run a small amount of code
+
+            order_data['result']['Order Duration'] = dt
+            trade = process_order_data(order_data)
+            # print(trade)
 
 
     def act(self, action):
@@ -1146,6 +1221,7 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
         return info['cur_val']
 
 
+
 def run_agent(mode, path_dict, start_date, end_date, episodes, symbols='USDBTC'):
     # Mode should be a string, either train or test or run
     # maybe it would be helpful to run this through command line argv etc
@@ -1163,6 +1239,7 @@ def run_agent(mode, path_dict, start_date, end_date, episodes, symbols='USDBTC')
         # Returns the percentage increase/decrease
         return round(final / initial - 1, 4) * 100
 
+    num_episodes = 100
     batch_size = 32  # sampleing from replay memory
     initial_investment = 100
     if mode in ['train', 'test']:
@@ -1182,7 +1259,9 @@ def run_agent(mode, path_dict, start_date, end_date, episodes, symbols='USDBTC')
 
         df = add_features(df)
         df = strip_open_high_low(df)
+
         print(df.head())
+        save_historical_data(path_dict, df)
 
         data_to_fit = df.drop('Date', axis = 1).values
 
@@ -1202,7 +1281,9 @@ def run_agent(mode, path_dict, start_date, end_date, episodes, symbols='USDBTC')
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
+
             agent.epsilon_min = 0.#00001
+            agent.epsilon_min = 0.0005
             agent.epsilon = agent.epsilon_min
 
             # load trained weights
@@ -1338,7 +1419,6 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--mode', type=str, required=True,
                         help='either "train" or "test"')
     args = parser.parse_args()
-    mode = args.mode
 
 
     #cryptodatadownload has gaps
@@ -1370,6 +1450,7 @@ if __name__ == '__main__':
     else:
         print('Unknown OS passed when defining the paths')  # this should throw and error
 
+
     if mode in ['train']:
         #train
         start = datetime(2018, 11, 1)
@@ -1380,9 +1461,11 @@ if __name__ == '__main__':
     elif mode == 'run':
         start = datetime(2019,12, 14)
         end = datetime(2019, 12, 29)
+
     else:
-        assert(mode == 'test')  #make sure that a proper mode was passed
+        assert(args.mode == 'test')  #make sure that a proper mode was passed
         #test
+
         start = datetime(2019,12, 13)
         end = datetime.now()
         # start = datetime(2018, 9, 20)
@@ -1399,3 +1482,5 @@ if __name__ == '__main__':
     #     start = datetime(2019,1, 1)
     #     end = datetime(2019, 1, 15)
     #     run_agent('test', paths, start, end)
+        # start = datetime(2019,12, 14)
+        # end = datetime(2019, 12, 28)
