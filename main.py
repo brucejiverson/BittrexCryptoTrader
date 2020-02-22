@@ -1,6 +1,4 @@
 from bittrex.bittrex import *
-# from data_tools import *
-
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -147,35 +145,33 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
                 print('Retrying...')
 
         df = df.append(candle_df)
-
-
-
-    if df.empty or df.Date.min() > start_date:  # try to fetch from updated
-        print('Fetching data from cumulative data repository.')
-
-        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
-
-        if up_df.empty:
-            print('Cumulative data repository was empty.')
-        else:
-            print('Success fetching from cumulative data repository.')
-            df = df.append(up_df)
-
-    if df.empty or df.Date.min() > start_date:  # Fetch from download file (this is last because its slow)
-
-        print('Fetching data from the download file.')
-        # get the historic data. Columns are Timestamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-
-        def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-        orig_df = pd.read_csv(path_dict['downloaded history'], usecols=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
-            'Timestamp'], date_parser=dateparse)
-        orig_df.rename(columns={'Timestamp': 'Date', 'O': 'BTCOpen', 'H': 'BTCHigh',
-                                'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
-
-        assert not orig_df.empty
-
-        df = df.append(orig_df)
+    #
+    # if df.empty or df.Date.min() > start_date:  # try to fetch from updated
+    #     print('Fetching data from cumulative data repository.')
+    #
+    #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+    #     up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
+    #
+    #     if up_df.empty:
+    #         print('Cumulative data repository was empty.')
+    #     else:
+    #         print('Success fetching from cumulative data repository.')
+    #         df = df.append(up_df)
+    #
+    # if df.empty or df.Date.min() > start_date:  # Fetch from download file (this is last because its slow)
+    #
+    #     print('Fetching data from the download file.')
+    #     # get the historic data. Columns are Timestamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+    #
+    #     def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+    #     orig_df = pd.read_csv(path_dict['downloaded history'], usecols=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
+    #         'Timestamp'], date_parser=dateparse)
+    #     orig_df.rename(columns={'Timestamp': 'Date', 'O': 'BTCOpen', 'H': 'BTCHigh',
+    #                             'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
+    #
+    #     assert not orig_df.empty
+    #
+    #     df = df.append(orig_df)
 
     # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
     assert(df.Date.min() <= start_date)
@@ -252,7 +248,7 @@ def save_historical_data(path_dict, df):    #same
 
 def add_sma_as_column(mydata, p):
     # p is a number
-    price = mydata['BTCClose'].values  # returns an np price
+    price = mydata['BTCClose'].values  # returns an np price, faster
 
     sma = np.empty_like(price)
     for i, item in enumerate(np.nditer(price)):
@@ -261,7 +257,7 @@ def add_sma_as_column(mydata, p):
         elif i < p:
             sma[i] = price[0:i].mean()
         else:
-            sma[i] = price[i - p:i].mean()
+            sma[i] = price[(i - p):i].mean()
 
     # subtract
     indicator = np.empty_like(sma)
@@ -370,6 +366,7 @@ def get_scaler(env):
 
     scaler = StandardScaler()
     scaler.fit(states)
+
     return scaler   #didnt check cause I know I didnt change
 
 
@@ -473,6 +470,8 @@ class SimulatedMarketEnv:
         self.assets_owned = None
         self.asset_prices = None
         self.USD = None
+        self.mean_spread = .0003 #Fraction of asset value typical for the spread
+
 
         # Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
 
@@ -490,6 +489,7 @@ class SimulatedMarketEnv:
             if sum(item) <= 1:
                 self.action_list.append(item)
 
+        print(self.action_list)
         #This list is for indexing each of the actions
         self.action_space = np.arange(len(self.action_list))
 
@@ -530,9 +530,6 @@ class SimulatedMarketEnv:
             print(self.action_space)
             assert action in self.action_space  # Check that a valid action was passed
 
-        # get current value before performing the action
-        prev_val = self._get_val()
-        prev_price = self.asset_prices[0]
         # update price, i.e. go to the next day
         self.cur_step += 1
 
@@ -542,22 +539,13 @@ class SimulatedMarketEnv:
         self.asset_prices = self.asset_data[self.cur_step][0:self.n_asset]
 
         # perform the trade
-        self._trade(action)
-
-        # get the new value after taking the action
-        cur_val = self._get_val()
-        cur_price = self.asset_prices[0]
-        # reward is the increase in porfolio value
-        delta = (cur_price - prev_price)/prev_price #Percentage change in price
-        reward = delta*(self.assets_owned[0]*self.asset_prices[0] - self.USD)/cur_val
-        # self.rewards_hist = np.roll(self.rewards_hist,1)
-        # self.rewards_hist[0] = step_return
-        # reward = sortino_ratio(self.rewards_hist)
+        reward = self._trade(action)
 
         # done if we have run out of data
         done = self.cur_step == self.n_step - 1
 
         # store the current value of the portfolio here
+        cur_val = self._get_val()
         info = {'cur_val': cur_val}
 
         # conform to the Gym API
@@ -577,31 +565,34 @@ class SimulatedMarketEnv:
 
         #Instituted a try catch here to help with debugging and potentially as a solution to handling invalid/inf values in log
         try:
-            #Make data stationary
+
             if self.cur_step == 0:
                 stationary_slice = np.zeros(len(self.asset_data[0]))
-            else:
+
+            else:   #Make data stationary
                 slice = self.asset_data[self.cur_step]
                 last_slice = self.asset_data[self.cur_step - 1]
+
                 stationary_slice = np.empty(len(slice))
-                stationary_slice[0:2] = np.log(slice[0:2]) - np.log(last_slice[0:2])
-                stationary_slice[2:6] = slice[2:6]
-                state[self.n_asset+1:(self.n_asset*2 + 2 + self.n_indicators*self.n_asset)] =  stationary_slice   #Taken from data
-        except ValueError:
-            print(slice)
-            print(stationary_slice)
-            # print(state)
+
+                #Comment out one of the two below, the difference is statinary data. NEEDS AN UPGRADE FOR MULTIPLE ASSETS
+                # stationary_slice[0:2] = slice[0:2]
+                stationary_slice[0:2] = np.log(slice[0:2]) - np.log(last_slice[0:2]) #this is price and volume
+
+                stationary_slice[2:6] = slice[2:6] #these are indicators.
+                # print(stationary_slice)
+                # print(state)
+
+        except ValueError:  #Print shit out to help with debugging then throw error
+            # print(slice)
+            # print(stationary_slice)
+            print("Error in simulated market class, _get_state method.")
+            print(state)
             raise(ValueError)
-        # state =  self.asset_data[self.cur_step]   #Taken from data
-        # last_index = self.cur_step
-        # if last_index < 0:
-        #     last_index = 0
-        # last_price = self.asset_data[last_index][0]
-        # last_vol = self.asset_data[last_index][1]
-        #
-        # state[0] = state[0]/last_price
-        # state[1] = state[1]/last_vol
+
+        state[self.n_asset+1:self.state_dim] =  stationary_slice   #Taken from data
         # print(state)
+
         return state
 
     def _get_val(self):
@@ -611,8 +602,16 @@ class SimulatedMarketEnv:
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
 
+        # get current value before performing the action
+        prev_price = self.asset_prices[0]
+
         action_vec = self.action_list[action]
 
+        cur_price = self.asset_prices[0]
+        bid_price = cur_price*(1 - self.mean_spread/2)
+        ask_price = cur_price*(1 + self.mean_spread/2)
+
+        cur_val = self._get_val()
         if action_vec != self.last_action and self.period_since_trade >= self.min_trade_spacing:  # if attmepting to change state
 
             #Calculate the changes needed for each asset
@@ -620,40 +619,52 @@ class SimulatedMarketEnv:
 
             #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
             #First fulfill the required USD
-            val = self._get_val()
 
             # for i, d in enumerate(delta):
-            # self.assets_owned[0]  += delta[0]*val*self.asset_prices[0]
-            # self.USD -= delta[0]*val
+            # self.assets_owned[0]  += delta[0]*cur_val*self.asset_prices[0]
+            # self.USD -= delta[0]*cur_val
 
-
+            amount_bought = action_vec[0]*self.assets_owned[0]
+            # amount_sold =
             # Sell everything
             for i, a in enumerate(action_vec):
-                self.USD += self.assets_owned[i] * self.asset_prices[i]
+                self.USD += self.assets_owned[i] * bid_price
                 self.assets_owned[i] = 0
 
             # Buy back the right amounts
             for i, a in enumerate(action_vec):
                 cash_to_use = a * self.USD
-                self.assets_owned[i] = cash_to_use / self.asset_prices[i]
+                self.assets_owned[i] = cash_to_use / ask_price
                 self.USD -= cash_to_use
+
+            # amount_sold =
+            # amount_bought =
+            # reward = amount_sold*
+            # get the new value after taking the action
+            # reward is the increase in porfolio value
+            if action_vec[0] == 1:
+                #buying
+                delta = (ask_price - prev_price)#/prev_price #Percentage change in price THIS SHOULD REALLY USE THE NEXT PRICE
+            else:
+                #selling
+                delta = (bid_price - prev_price)#/prev_price #Percentage change in price THIS SHOULD REALLY USE THE NEXT PRICE
+
 
             self.last_action = action_vec
             self.period_since_trade = 0
         else:
-            self.period_since_trade += 1
+            delta = (cur_price - prev_price)
+
+        asset_to_usd_ratio = (self.assets_owned[0]*self.asset_prices[0] - self.USD)/cur_val #confirmed this is 1 or -1 (for gran size 1)
+        reward = delta*asset_to_usd_ratio
+        self.period_since_trade += 1    #Changed this while I was high, used to be in an else statement
+        return reward
 
 
 class BittrexMarketEnv:
     """
-    A multi-asset trading environment.
-    For now this has been adopted for only one asset.
-    Below shows how to add more.
-    The state size and the aciton size throughout the rest of this
-    program are linked to this class.
-    State: vector of size 7 (n_asset + n_asset*n_indicators)
-      - stationary_slice price of asset 1 (using BTCClose price)
-      - associated indicators for each asset
+    In progress.
+
     """
 
     def __init__(self, path_dict, initial_investment=10):
@@ -1003,7 +1014,8 @@ class DQNAgent(object):
         self.gamma = 0.95  # discount rate
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.005  # originally .01. The version here is set for training
-        self.epsilon_decay = 0.995  # originall .995
+        self.epsilon_decay = 0.95 # originall .995
+        self.learning_rate = .001
         # Get an instance of our model
         self.model = LinearModel(state_size, action_size)
 
@@ -1028,8 +1040,8 @@ class DQNAgent(object):
         target_full = self.model.predict(state)
         target_full[0, action] = target
 
-        # Run one training step of gradient descent
-        self.model.sgd(state, target_full)
+        # Run one training step of gradient descent.
+        self.model.sgd(state, target_full, self.learning_rate)
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
@@ -1107,7 +1119,7 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
         market = symbols[0:3] + '-' + symbols[3:6]
 
         df = fetch_historical_data(path_dict, market, start_date, end_date, my_bittrex2_0)  # oldest date info
-        save_historical_data(path_dict, df)
+        # save_historical_data(path_dict, df)
 
         base = 100
         add_features(df)
@@ -1121,7 +1133,6 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
         action_size = len(sim_env.action_space)
         agent = DQNAgent(state_size, action_size)
         my_scaler = get_scaler(sim_env)
-
         if mode == 'test':  #same
             print('Testing...')
             num_episodes = 10
@@ -1347,26 +1358,14 @@ if __name__ == '__main__':
         #train
         # start = datetime(2019,1, 1)
         # end = datetime(2019, 2, 1)
-        start = datetime(2019,12, 14)
-        end = datetime(2020, 1, 1)
+        start = datetime(2020,2, 12)
+        end = datetime(2020, 2, 22)
         # end = datetime.now() - timedelta(hours = 6)
 
-    else:
-        assert(mode == 'test')  #make sure that a proper mode was passed
-        #test
+    elif mode == 'test':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
-        start = datetime(2020,2, 3)
-        end = datetime(2020, 2, 13)
+        start = datetime(2020,2, 11)
+        end = datetime(2020, 2, 21)
 
-    run_agent(mode, paths, start, end, 100)
-
-    # for epochs in [200, 300, 400, 500, 600, 700, 800]:
-    #
-    #     start = datetime(2019,12, 14)
-    #     end = datetime(2019, 12, 29)
-    #
-    #     run_agent('train', paths, start, end)
-    #     start = datetime(2019,1, 1)
-    #     end = datetime(2019, 1, 15)
-    #     run_agent('test', paths, start, end)
+    run_agent(mode, paths, start, end, 2000)
