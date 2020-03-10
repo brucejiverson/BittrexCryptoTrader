@@ -11,6 +11,8 @@ symbols = 'BTCUSD' #Example: 'BTCUSD'
 #The below should be updated to be simplified to use parent directory? unsure how that works...
 #https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
 
+start = datetime(2016, 1, 1)
+end = datetime.now()
 if os == 'linux':
     paths = {'downloaded history': '/home/bruce/AlgoTrader/BittrexTrader/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv',
              'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols + '.csv',
@@ -41,15 +43,12 @@ my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 market = symbols[3:6] + '-' + symbols[0:3]
 
 
-# start = datetime(2012,1, 1)
-# end = datetime.now() - timedelta(hours = 1)
+df = fetch_historical_data(paths, market, start, end, my_bittrex)  #gets all data
+df = df[df['Date'] >= start_date]
+df = df[df['Date'] <= end_date]
+df = format_df(df)
 
-start = datetime(2016, 1, 1)
-end = datetime.now()
-
-df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
-
-# save_historical_data(paths, df)
+save_historical_data(paths, df)
 
 
 print('Historical data has been fetched, updated, and resaved.')

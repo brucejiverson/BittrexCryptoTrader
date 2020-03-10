@@ -145,33 +145,33 @@ def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
                 print('Retrying...')
 
         df = df.append(candle_df)
-    #
-    # if df.empty or df.Date.min() > start_date:  # try to fetch from updated
-    #     print('Fetching data from cumulative data repository.')
-    #
-    #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-    #     up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
-    #
-    #     if up_df.empty:
-    #         print('Cumulative data repository was empty.')
-    #     else:
-    #         print('Success fetching from cumulative data repository.')
-    #         df = df.append(up_df)
-    #
-    # if df.empty or df.Date.min() > start_date:  # Fetch from download file (this is last because its slow)
-    #
-    #     print('Fetching data from the download file.')
-    #     # get the historic data. Columns are Timestamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-    #
-    #     def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-    #     orig_df = pd.read_csv(path_dict['downloaded history'], usecols=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
-    #         'Timestamp'], date_parser=dateparse)
-    #     orig_df.rename(columns={'Timestamp': 'Date', 'O': 'BTCOpen', 'H': 'BTCHigh',
-    #                             'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
-    #
-    #     assert not orig_df.empty
-    #
-    #     df = df.append(orig_df)
+
+    if df.empty or df.Date.min() > start_date:  # try to fetch from updated
+        print('Fetching data from cumulative data repository.')
+
+        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
+
+        if up_df.empty:
+            print('Cumulative data repository was empty.')
+        else:
+            print('Success fetching from cumulative data repository.')
+            df = df.append(up_df)
+
+    if df.empty or df.Date.min() > start_date:  # Fetch from download file (this is last because its slow)
+
+        print('Fetching data from the download file.')
+        # get the historic data. Columns are Timestamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+
+        def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+        orig_df = pd.read_csv(path_dict['downloaded history'], usecols=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
+            'Timestamp'], date_parser=dateparse)
+        orig_df.rename(columns={'Timestamp': 'Date', 'O': 'BTCOpen', 'H': 'BTCHigh',
+                                'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
+
+        assert not orig_df.empty
+
+        df = df.append(orig_df)
 
     # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
     assert(df.Date.min() <= start_date)
@@ -470,7 +470,7 @@ class SimulatedMarketEnv:
         self.assets_owned = None
         self.asset_prices = None
         self.USD = None
-        self.mean_spread = .0003 #Fraction of asset value typical for the spread
+        self.mean_spread = .000#3 #Fraction of asset value typical for the spread
 
 
         # Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
@@ -478,7 +478,7 @@ class SimulatedMarketEnv:
         self.min_trade_spacing = 1  # The number of datapoints that must occur between trades
         self.period_since_trade = self.min_trade_spacing
 
-        portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset
+        portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
         # The possible portions of the portfolio that could be allocated to a single asset
         possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
         # calculate all possible allocations of wealth across the available assets
@@ -489,7 +489,6 @@ class SimulatedMarketEnv:
             if sum(item) <= 1:
                 self.action_list.append(item)
 
-        print(self.action_list)
         #This list is for indexing each of the actions
         self.action_space = np.arange(len(self.action_list))
 
@@ -612,36 +611,50 @@ class SimulatedMarketEnv:
         ask_price = cur_price*(1 + self.mean_spread/2)
 
         cur_val = self._get_val()
+
+
         if action_vec != self.last_action and self.period_since_trade >= self.min_trade_spacing:  # if attmepting to change state
-
             #Calculate the changes needed for each asset
-            delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
+            # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
 
-            #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
-            #First fulfill the required USD
+            # print("target" + str(action_vec[0]))
+            # print("what i have" + str(fraction_i_have))
 
-            # for i, d in enumerate(delta):
-            # self.assets_owned[0]  += delta[0]*cur_val*self.asset_prices[0]
-            # self.USD -= delta[0]*cur_val
+            # if (action_vec[0] > fraction_i_have):
+            #     #broke this down into a bunch of variables instead of one equation to follow the math more easily.
+            #     fraction_to_buy = action_vec[0] - fraction_i_have
+            #     cash_to_use = fraction_to_buy*cur_val #USD
+            #     amount_to_buy = cash_to_use/ask_price #convert to BTC
+            #
+            #     self.USD -= cash_to_use
+            #     self.assets_owned[0] += amount_to_buy
+            #
+            # elif (action_vec[0] < fraction_i_have):
+            #     fraction_to_sell = fraction_i_have - action_vec[0]
+            #     cash_to_use = fraction_to_sell*cur_val #USD
+            #     amount_to_sell = cash_to_use*ask_price #convert to BTC
+            #
+            #     self.USD += cash_to_use
+            #     self.assets_owned[0] -= amount_to_sell
 
-            amount_bought = action_vec[0]*self.assets_owned[0]
-            # amount_sold =
-            # Sell everything
+
             for i, a in enumerate(action_vec):
-                self.USD += self.assets_owned[i] * bid_price
-                self.assets_owned[i] = 0
+                fractional_change_needed = a - (1 - self.USD/cur_val)
 
-            # Buy back the right amounts
-            for i, a in enumerate(action_vec):
-                cash_to_use = a * self.USD
-                self.assets_owned[i] = cash_to_use / ask_price
-                self.USD -= cash_to_use
+                if abs(fractional_change_needed) > .01:
+                    # print("Frac change: " + str(fractional_change_needed))
 
-            # amount_sold =
-            # amount_bought =
-            # reward = amount_sold*
-            # get the new value after taking the action
-            # reward is the increase in porfolio value
+                    trade_amount = fractional_change_needed*cur_val
+                    # print("Trade amount: " + str(trade_amount))
+                    if trade_amount > 0:    #buy
+                        self.assets_owned[0] += trade_amount/bid_price
+                    else:   #sell
+                        self.assets_owned[0] += trade_amount/ask_price
+
+                    self.USD -= trade_amount
+
+
+            #legacy
             if action_vec[0] == 1:
                 #buying
                 delta = (ask_price - prev_price)#/prev_price #Percentage change in price THIS SHOULD REALLY USE THE NEXT PRICE
@@ -649,7 +662,7 @@ class SimulatedMarketEnv:
                 #selling
                 delta = (bid_price - prev_price)#/prev_price #Percentage change in price THIS SHOULD REALLY USE THE NEXT PRICE
 
-
+            # print("Initial val: " + str(cur_val) + ". Post trade val:" + str(self._get_val()))
             self.last_action = action_vec
             self.period_since_trade = 0
         else:
@@ -1015,7 +1028,7 @@ class DQNAgent(object):
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.005  # originally .01. The version here is set for training
         self.epsilon_decay = 0.95 # originall .995
-        self.learning_rate = .001
+        self.learning_rate = .004
         # Get an instance of our model
         self.model = LinearModel(state_size, action_size)
 
@@ -1124,7 +1137,7 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
         base = 100
         add_features(df)
         df = strip_open_high_low(df)
-        print(df.head())
+        # print(df.head())
 
         data_to_fit = df.drop('Date', axis = 1).values
 
@@ -1358,14 +1371,14 @@ if __name__ == '__main__':
         #train
         # start = datetime(2019,1, 1)
         # end = datetime(2019, 2, 1)
-        start = datetime(2020,2, 12)
-        end = datetime(2020, 2, 22)
+        start = datetime(2020,2, 14)
+        end = datetime(2020, 2, 23)
         # end = datetime.now() - timedelta(hours = 6)
 
     elif mode == 'test':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
-        start = datetime(2020,2, 11)
-        end = datetime(2020, 2, 21)
+        start = datetime(2020,2, 14)
+        end = datetime(2020, 2, 23)
 
-    run_agent(mode, paths, start, end, 2000)
+    run_agent(mode, paths, start, end, 10)
