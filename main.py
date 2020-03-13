@@ -19,7 +19,25 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 import warnings
 
-#Set warnings to be caught as errors
+"""DESIRED FEATURES
+-Plot which currency is held at any given time
+-Functional, automated trading
+-Able to filter data for larger granulatirites
+-Fixed simulated env trading
+-Benchmarking functions (test simple strategies)
+-model slippage based on trading volume and
+-fabridate simple data to train on to validate learning
+-Start regularly scraping data: volume, spread, and sentiment for future training
+
+
+Big Picture:
+-Deep learning?
+-Better feature engineering
+-multiple currencies (need data, etc)
+-Infrastructure :/ this is expensive and maybe impractical
+-Trading multiple currencies
+-Start regularly scraping data: volume, spread, and sentiment for future training
+"""
 
 
 # I had a ton of trouble getting the plots to look right with the dates.
@@ -1381,4 +1399,4 @@ if __name__ == '__main__':
         start = datetime(2020,2, 14)
         end = datetime(2020, 2, 23)
 
-    run_agent(mode, paths, start, end, 10)
+    run_agent(mode, paths, start, end, 800)

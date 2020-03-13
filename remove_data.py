@@ -13,6 +13,8 @@ symbols = 'BTCUSD' #Example: 'BTCUSD'
 
 start = datetime(2016, 1, 1)
 end = datetime.now()
+
+
 if os == 'linux':
     paths = {'downloaded history': '/home/bruce/AlgoTrader/BittrexTrader/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv',
              'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols + '.csv',
@@ -44,14 +46,30 @@ market = symbols[3:6] + '-' + symbols[0:3]
 
 
 df = fetch_historical_data(paths, market, start, end, my_bittrex)  #gets all data
-df = df[df['Date'] >= start_date]
-df = df[df['Date'] <= end_date]
+df = df[df['Date'] >= start]
+df = df[df['Date'] <= end]
 df = format_df(df)
 
-save_historical_data(paths, df)
+def save_historical_data(path_dict, df):    #same
+    # This function writes the information in the original format to the csv file
+    # including new datapoints that have been fetched
+
+print('Writing data to CSV.')
+
+path = paths['updated history']
+# must create new df as df is passed by reference
+# # datetimes to strings
+
+df_to_save = df
+df_to_save['Date'] = df_to_save['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
+
+df_to_save.to_csv(path, index=False)
+
+# df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
+print('Data written.')
 
 
-print('Historical data has been fetched, updated, and resaved.')
+print('Historical data has been fetched, filtered by date, and resaved.')
 
 
 assert not df.empty
