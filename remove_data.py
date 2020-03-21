@@ -11,7 +11,7 @@ symbols = 'BTCUSD' #Example: 'BTCUSD'
 #The below should be updated to be simplified to use parent directory? unsure how that works...
 #https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
 
-start = datetime(2016, 1, 1)
+start = datetime(2017, 1, 1)
 end = datetime.now()
 
 
@@ -44,13 +44,12 @@ my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
 market = symbols[3:6] + '-' + symbols[0:3]
 
-
 df = fetch_historical_data(paths, market, start, end, my_bittrex)  #gets all data
 df = df[df['Date'] >= start]
 df = df[df['Date'] <= end]
 df = format_df(df)
 
-def save_historical_data(path_dict, df):    #same
+# def save_historical_data(path_dict, df):    #same
     # This function writes the information in the original format to the csv file
     # including new datapoints that have been fetched
 

@@ -20,15 +20,19 @@ from sklearn.preprocessing import StandardScaler
 import warnings
 
 """DESIRED FEATURES
+-be clear about episode/epoch terminology
+-data that isnt fucked
 -Plot which currency is held at any given time
 -Functional, automated trading
--Able to filter data for larger granulatirites
--Fixed simulated env trading
+-Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -Benchmarking functions (test simple strategies)
--model slippage based on trading volume and
--fabridate simple data to train on to validate learning
+-model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
+-fabricate simple data to train on to validate learning
 -Start regularly scraping data: volume, spread, and sentiment for future training
-
+-Data for multiple currencies
+-understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
+-updating features in real time
+-Understand plotting losses. Possibly switch to plotting profitablilty over course of training
 
 Big Picture:
 -Deep learning?
@@ -36,7 +40,6 @@ Big Picture:
 -multiple currencies (need data, etc)
 -Infrastructure :/ this is expensive and maybe impractical
 -Trading multiple currencies
--Start regularly scraping data: volume, spread, and sentiment for future training
 """
 
 
@@ -54,7 +57,7 @@ def process_candle_dict(candle_dictionary): #same
     # Dataframe formatted the same as
     # V and BV refer to volume and base volume
     df = pd.DataFrame(candle_dictionary['result'])
-    df.drop(columns=["BV", "V", 'O', 'H', 'L'])
+    df.drop(columns=["BV"])
     df = df.rename(columns={'T': "Date", 'O': 'BTCOpen', 'H': 'BTCHigh', 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'})
 
     df = df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
@@ -70,7 +73,8 @@ def ROI(initial, final):
 
 
 def process_order_data(dict): #same
-    # Example input: {'success': True, 'message': '', 'result': {'AccountId': None, 'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC', 'Type': 'LIMIT_SELL', 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Limit': 1.3, 'Reserved': None, 'ReserveRemaining': None, 'CommissionReserved': None, 'CommissionReserveRemaining': None, 'CommissionPaid': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722, 'Opened': '2019-11-19T07:42:48.85', 'Closed': '2019-11-19T07:42:48.85', 'IsOpen': False, 'Sentinel': None, 'CancelInitiated': False, 'ImmediateOrCancel': False, 'IsConditional': False, 'Condition': 'NONE', 'ConditionTarget': 0.0}}
+    # Example input: {'success': True, 'message': '',
+    #'result': {'AccountId': None, 'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC', 'Type': 'LIMIT_SELL', 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Limit': 1.3, 'Reserved': None, 'ReserveRemaining': None, 'CommissionReserved': None, 'CommissionReserveRemaining': None, 'CommissionPaid': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722, 'Opened': '2019-11-19T07:42:48.85', 'Closed': '2019-11-19T07:42:48.85', 'IsOpen': False, 'Sentinel': None, 'CancelInitiated': False, 'ImmediateOrCancel': False, 'IsConditional': False, 'Condition': 'NONE', 'ConditionTarget': 0.0}}
 
     # in order to construct a df, the values of the dict cannot be scalars, must be lists, so convert to lists
     results = {}
@@ -220,6 +224,13 @@ def filter_error_from_download_data(input_df):
     return input_df #same
 
 
+def change_granulaty(input_df, gran):
+    """This function returns every nth row of a dataframe"""
+    print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
+
+    return input_df.iloc[::gran, :]
+
+
 def strip_open_high_low(input_df):
 
     df_cols = input_df.columns
@@ -280,9 +291,34 @@ def add_sma_as_column(mydata, p):
     # subtract
     indicator = np.empty_like(sma)
     for i, item in enumerate(np.nditer(price)):
-        indicator[i] = sma[i] - price[i]
+        indicator[i] = sma[i] - price[i]trip
 
     mydata['SMA_' + str(p)] = indicator  # modifies the input df
+
+
+def add_renko(mydata, blocksize):
+    #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
+    # p is a number
+    prices = mydata['BTCClose'].values  # returns an np price, faster
+
+    indicator = np.empty_like(price)
+
+    for i, price in enumerate(np.nditer(prices)):
+        if i == 0:
+            indicator[i] = 0
+            threshholds = [price - blocksize, price + blocksize]
+        elif price < threshholds[0]:
+            indicators -= 1
+            threshholds = [price - blocksize, price + blocksize]
+        elif price > threshholds[1]:
+            indicators += 1
+            threshholds = [price - blocksize, price + blocksize]
+
+
+        elif i < p:
+            sma[i] = price[0:i].mean()
+        else:
+            sma[i] = price[(i - p):i].mean()
 
 
 def add_features(input_df): #This didnt exist in this file, added it from the broken
@@ -1084,6 +1120,30 @@ class DQNAgent(object):
         self.model.save_weights(name)
 
 
+class BenchMarker:
+    """For now, this just uses the Renko strategy. Eventually,
+    this should take in a string parameter that dictates which
+    benchmarking strategy is used.
+
+    Be careful with where each feature is in the state, as this class reads in
+    features from the state by their position.
+    The action to return should be a list of actions."""
+
+    def __init__(state_size, action_size, block_size):
+        self.action_size = action_size
+        self.state_size = state_size
+
+        self.block_size = block_size
+
+    def act(self, state):
+        thresh = 5 #change this
+        if state[2] > thresh: #change this to match the position in the state
+            return 1
+        else:
+            return 0
+
+
+
 def play_one_episode(agent, env, scaler, is_train, record=False):
     # note: after transforming states are already 1xD
     log_columns = ['Value']
@@ -1101,6 +1161,7 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
     while not done:
 
         action = agent.act(state)
+        print(action)
         next_state, val, reward, done, info = env.step(action)
 
         if record == True:
@@ -1155,7 +1216,9 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
         base = 100
         add_features(df)
         df = strip_open_high_low(df)
-        # print(df.head())
+        print(df.head())
+        df = change_granulaty(df, 5)
+        print(df.head())
 
         data_to_fit = df.drop('Date', axis = 1).values
 
@@ -1354,7 +1417,7 @@ if __name__ == '__main__':
                         help='either "train" or "test"')
     args = parser.parse_args()
     mode = args.mode
-
+    assert mode in ["train", "test", "run"]
 
     #cryptodatadownload has gaps
     #Place to download: https://www.kaggle.com/jessevent/all-crypto-currencies iSinkInWater, brucejamesiverson@gmail.com, I**********
