@@ -19,12 +19,25 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 import warnings
 
+"""Whats Bruce working on?
+-adding renko
+-benchmarking
+-Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
+"""
+
+"""Whats sean working on?
+
+
+"""
+
+
 """DESIRED FEATURES
 -be clear about episode/epoch terminology
--data that isnt fucked
+-better data
+-let the agent give two orders, a limit and stop
+-change feature engineering to better represent how feature engineering works in real time
 -Plot which currency is held at any given time
 -Functional, automated trading
--Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -Benchmarking functions (test simple strategies)
 -model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
 -fabricate simple data to train on to validate learning
@@ -291,7 +304,7 @@ def add_sma_as_column(mydata, p):
     # subtract
     indicator = np.empty_like(sma)
     for i, item in enumerate(np.nditer(price)):
-        indicator[i] = sma[i] - price[i]trip
+        indicator[i] = sma[i] - price[i]
 
     mydata['SMA_' + str(p)] = indicator  # modifies the input df
 
@@ -301,36 +314,49 @@ def add_renko(mydata, blocksize):
     # p is a number
     prices = mydata['BTCClose'].values  # returns an np price, faster
 
-    indicator = np.empty_like(price)
+    indicator = np.empty_like(prices)
 
+    indicator_value = 0
     for i, price in enumerate(np.nditer(prices)):
         if i == 0:
-            indicator[i] = 0
-            threshholds = [price - blocksize, price + blocksize]
-        elif price < threshholds[0]:
-            indicators -= 1
-            threshholds = [price - blocksize, price + blocksize]
-        elif price > threshholds[1]:
-            indicators += 1
-            threshholds = [price - blocksize, price + blocksize]
+            upper_thresh = price + blocksize
+            lower_thresh = price - blocksize
+        elif price <= lower_thresh: #create a down block
+            # if indicator_value > 0: #change in direction
+            #     indicator_value = -blocksize
+            #
+            # else:
+            indicator_value -= blocksize #continuing a downtrend
 
+            lower_thresh -= blocksize
+            upper_thresh = lower_thresh + 3*blocksize
 
-        elif i < p:
-            sma[i] = price[0:i].mean()
-        else:
-            sma[i] = price[(i - p):i].mean()
+        elif price >= upper_thresh:
+            # if indicator_value < 0:
+            #     indicator_value = blocksize #change in direction
+            # else:
+            indicator_value += blocksize #continuing an uptrend
+
+            upper_thresh += blocksize
+            lower_thresh = upper_thresh - 3*blocksize
+
+        indicator[i] = indicator_value
+
+    mydata['Renko'] = indicator
 
 
 def add_features(input_df): #This didnt exist in this file, added it from the broken
-    base = 100
-    add_sma_as_column(input_df, base)
-    add_sma_as_column(input_df, int(base*8/5))
-    add_sma_as_column(input_df, int(base*13/5))
+    """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
+    # base = 50
+    # add_sma_as_column(input_df, base)
+    # add_sma_as_column(input_df, int(base*8/5))
+    # add_sma_as_column(input_df, int(base*13/5))
+    add_renko(input_df, 100)
 
-    # input_df['BTCMACD'] = ta.trend.macd_diff(input_df['BTCClose'], fillna  = True)
+    input_df['BTCMACD'] = ta.trend.macd_diff(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = ta.momentum.rsi(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = input_df['BTCRSI'] - 50 #center at 0
-    # input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
+    input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
 
 
     input_df = format_df(input_df)
@@ -524,7 +550,7 @@ class SimulatedMarketEnv:
         self.assets_owned = None
         self.asset_prices = None
         self.USD = None
-        self.mean_spread = .000#3 #Fraction of asset value typical for the spread
+        self.mean_spread = .0001 #Fraction of asset value typical for the spread
 
 
         # Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
@@ -579,11 +605,16 @@ class SimulatedMarketEnv:
 
         if not action in self.action_space:
             #Included for debugging
-            print(action)
+            # print(action)
             print(self.action_space)
             assert action in self.action_space  # Check that a valid action was passed
 
-        # update price, i.e. go to the next day
+        prev_val = self._get_val()
+
+        # perform the trade
+        self._trade(action)
+
+        # update price, i.e. go to the next minute
         self.cur_step += 1
 
         """ the data, for asset_data can be thought of as nested arrays, where indexing the
@@ -591,15 +622,15 @@ class SimulatedMarketEnv:
         in time can be captured by indexing that snapshot."""
         self.asset_prices = self.asset_data[self.cur_step][0:self.n_asset]
 
-        # perform the trade
-        reward = self._trade(action)
-
-        # done if we have run out of data
-        done = self.cur_step == self.n_step - 1
 
         # store the current value of the portfolio here
         cur_val = self._get_val()
         info = {'cur_val': cur_val}
+
+        reward = (cur_val - prev_val) #this used to be more complicated
+
+        # done if we have run out of data
+        done = self.cur_step == self.n_step - 1
 
         # conform to the Gym API
         #      next state       reward  flag  info dict.
@@ -671,61 +702,41 @@ class SimulatedMarketEnv:
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
 
-            # print("target" + str(action_vec[0]))
-            # print("what i have" + str(fraction_i_have))
 
-            # if (action_vec[0] > fraction_i_have):
-            #     #broke this down into a bunch of variables instead of one equation to follow the math more easily.
-            #     fraction_to_buy = action_vec[0] - fraction_i_have
-            #     cash_to_use = fraction_to_buy*cur_val #USD
-            #     amount_to_buy = cash_to_use/ask_price #convert to BTC
-            #
-            #     self.USD -= cash_to_use
-            #     self.assets_owned[0] += amount_to_buy
-            #
-            # elif (action_vec[0] < fraction_i_have):
-            #     fraction_to_sell = fraction_i_have - action_vec[0]
-            #     cash_to_use = fraction_to_sell*cur_val #USD
-            #     amount_to_sell = cash_to_use*ask_price #convert to BTC
-            #
-            #     self.USD += cash_to_use
-            #     self.assets_owned[0] -= amount_to_sell
+            #currently set up for only bitcoin
+            """for i, a in enumerate(action_vec): #for each asset
+                fractional_change_needed = a - (1 - self.USD/cur_val) #desired fraction of portfolio to have in asset - fraction held
 
-
-            for i, a in enumerate(action_vec):
-                fractional_change_needed = a - (1 - self.USD/cur_val)
-
-                if abs(fractional_change_needed) > .01:
+                if abs(fractional_change_needed) > .05: #Porfolio granulatiryt will change with asset price movement. This sets a threshhold for updating position
                     # print("Frac change: " + str(fractional_change_needed))
 
-                    trade_amount = fractional_change_needed*cur_val
+                    trade_amount = fractional_change_needed*cur_val #in USD
                     # print("Trade amount: " + str(trade_amount))
                     if trade_amount > 0:    #buy
                         self.assets_owned[0] += trade_amount/bid_price
                     else:   #sell
                         self.assets_owned[0] += trade_amount/ask_price
 
-                    self.USD -= trade_amount
+                    self.USD -= trade_amount"""
 
+            #Below this is the old way
+             # Sell everything
+            for i, a in enumerate(action_vec):
+                self.USD += self.assets_owned[i] * self.asset_prices[i]
+                self.assets_owned[i] = 0
 
-            #legacy
-            if action_vec[0] == 1:
-                #buying
-                delta = (ask_price - prev_price)#/prev_price #Percentage change in price THIS SHOULD REALLY USE THE NEXT PRICE
-            else:
-                #selling
-                delta = (bid_price - prev_price)#/prev_price #Percentage change in price THIS SHOULD REALLY USE THE NEXT PRICE
+            # Buy back the right amounts
+            for i, a in enumerate(action_vec):
+                cash_to_use = a * self.USD
+                self.assets_owned[i] = cash_to_use / self.asset_prices[i]
+                self.USD -= cash_to_use
+
 
             # print("Initial val: " + str(cur_val) + ". Post trade val:" + str(self._get_val()))
             self.last_action = action_vec
             self.period_since_trade = 0
-        else:
-            delta = (cur_price - prev_price)
 
-        asset_to_usd_ratio = (self.assets_owned[0]*self.asset_prices[0] - self.USD)/cur_val #confirmed this is 1 or -1 (for gran size 1)
-        reward = delta*asset_to_usd_ratio
         self.period_since_trade += 1    #Changed this while I was high, used to be in an else statement
-        return reward
 
 
 class BittrexMarketEnv:
@@ -1161,7 +1172,7 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
     while not done:
 
         action = agent.act(state)
-        print(action)
+        # print(action)
         next_state, val, reward, done, info = env.step(action)
 
         if record == True:
@@ -1213,11 +1224,12 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
         df = fetch_historical_data(path_dict, market, start_date, end_date, my_bittrex2_0)  # oldest date info
         # save_historical_data(path_dict, df)
 
-        base = 100
+        print("ORIGINAL DATA: ")
+        print(df.head())
+        df = change_granulaty(df, 3)
         add_features(df)
         df = strip_open_high_low(df)
-        print(df.head())
-        df = change_granulaty(df, 5)
+        print("DATA TO RUN ON: ")
         print(df.head())
 
         data_to_fit = df.drop('Date', axis = 1).values
@@ -1227,16 +1239,16 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
         action_size = len(sim_env.action_space)
         agent = DQNAgent(state_size, action_size)
         my_scaler = get_scaler(sim_env)
-        if mode == 'test':  #same
+        if mode == 'test':
             print('Testing...')
-            num_episodes = 10
+            num_episodes = 5
             # then load the previous scaler
             with open(f'{models_folder}/scaler.pkl', 'rb') as f:
                 my_scaler = pickle.load(f)
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon_min = 0.0001
+            agent.epsilon_min = 0.0005
             agent.epsilon = agent.epsilon_min
 
             # load trained weights
@@ -1257,16 +1269,13 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
         # play the game num_episodes times
         for e in range(num_episodes):
 
-            if e == range(num_episodes)[-1]:        #Setting this so that the very last playthrough is purely deterministic
-                agent.epsilon_min = 0.01
-                agent.epsilon = agent.epsilon_min
-
             t0 = datetime.now()
 
             if e == num_episodes - 1:
                 val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
             else:
                 val = play_one_episode(agent, sim_env, my_scaler, mode)
+
             roi = return_on_investment(val, initial_investment)  # Transform to ROI
             dt = datetime.now() - t0
             # if not end_time in locals():    #initialize with a direct calculation
@@ -1275,21 +1284,18 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
             time_remaining -= dt
             time_remaining = time_remaining + \
                 (dt * (num_episodes - (e + 1)) - time_remaining) / (e + 1)
-            if e % 100 == 0:
-                # save the weights when we are done
-                if mode in ['train', 'add_train']:
-                    # save the DQN
-                    agent.save(f'{models_folder}/linear.npz')
-                    print('DQN saved.')
+            if e % 100 == 0 and mode in ['train', 'add_train']: # save the weights when we are done
+                # save the DQN
+                agent.save(f'{models_folder}/linear.npz')
+                print('DQN saved.')
 
-                    print('Saving scaler...')
-                    # save the scaler
-                    with open(f'{models_folder}/scaler.pkl', 'wb') as f:
-                        pickle.dump(my_scaler, f)
-                    print('Scaler saved.')
-                    # plot losses
-            if num_episodes <= 500 or e % 10 == 0:
-                print(f"episode: {e + 1}/{num_episodes}, end value: {val:.2f}, episode roi: {roi:.2f}, time remaining: {time_remaining}")
+                print('Saving scaler...')
+                # save the scaler
+                with open(f'{models_folder}/scaler.pkl', 'wb') as f:
+                    pickle.dump(my_scaler, f)
+                print('Scaler saved.')
+
+            print(f"episode: {e + 1}/{num_episodes}, end value: {val:.2f}, episode roi: {roi:.2f}, time remaining: {time_remaining}")
             portfolio_value.append(val)  # append episode end portfolio value
 
         # save the weights when we are done
@@ -1452,14 +1458,15 @@ if __name__ == '__main__':
         #train
         # start = datetime(2019,1, 1)
         # end = datetime(2019, 2, 1)
-        start = datetime(2020,2, 14)
-        end = datetime(2020, 2, 23)
+        start = datetime(2020, 3, 25)
+        end = datetime(2020, 4, 3)
         # end = datetime.now() - timedelta(hours = 6)
 
     elif mode == 'test':
         # start = datetime(2019,12, 14)
+        start = datetime(2020, 3, 25)
         # end = datetime(2019, 12, 28)
-        start = datetime(2020,2, 14)
-        end = datetime(2020, 2, 23)
+        end = datetime(2020, 4, 3)
 
-    run_agent(mode, paths, start, end, 800)
+
+    run_agent(mode, paths, start, end, 1000)
