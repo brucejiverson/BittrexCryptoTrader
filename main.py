@@ -79,6 +79,11 @@ def ROI(initial, final):
     # Returns the percentage increase/decrease
     return round(final / initial - 1, 4) * 100
 
+#def log_ROI(initial, final):
+    # Returns the log rate of return, which accounts for how percent changes "stack" over time
+    # For example, a 10% increase followed by a 10% decrease is truly a 1% decrease over time (100 -> 110 -> 99)
+    # Arithmetic ROI would show an overall trend of 0%, but log ROI properly computes this to be -1%
+    #return round(np.log(final/initial), 4) *100 
 
 def process_order_data(dict):
     # Example input: {'success': True, 'message': '',
