@@ -20,31 +20,29 @@ from sklearn.preprocessing import StandardScaler
 import warnings
 
 """Whats Bruce working on?
--adding renko
--benchmarking
+
+-better data
+-Benchmarking functions (test simple strategies)
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
+-change feature engineering to better represent how feature engineering works in real time
+-Start regularly scraping data: volume, spread, and sentiment for future training
 """
 
 """Whats sean working on?
 
+-Plot which currency is held at any given time
 
 """
 
 
 """DESIRED FEATURES
 -be clear about episode/epoch terminology
--better data
 -let the agent give two orders, a limit and stop
--change feature engineering to better represent how feature engineering works in real time
--Plot which currency is held at any given time
 -Functional, automated trading
--Benchmarking functions (test simple strategies)
 -model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
 -fabricate simple data to train on to validate learning
--Start regularly scraping data: volume, spread, and sentiment for future training
 -Data for multiple currencies
 -understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
--updating features in real time
 -Understand plotting losses. Possibly switch to plotting profitablilty over course of training
 
 Big Picture:
@@ -55,9 +53,6 @@ Big Picture:
 -Trading multiple currencies
 """
 
-
-# I had a ton of trouble getting the plots to look right with the dates.
-# This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
 
 
 def maybe_make_dir(directory):
@@ -85,7 +80,7 @@ def ROI(initial, final):
     return round(final / initial - 1, 4) * 100
 
 
-def process_order_data(dict): #same
+def process_order_data(dict):
     # Example input: {'success': True, 'message': '',
     #'result': {'AccountId': None, 'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC', 'Type': 'LIMIT_SELL', 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Limit': 1.3, 'Reserved': None, 'ReserveRemaining': None, 'CommissionReserved': None, 'CommissionReserveRemaining': None, 'CommissionPaid': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722, 'Opened': '2019-11-19T07:42:48.85', 'Closed': '2019-11-19T07:42:48.85', 'IsOpen': False, 'Sentinel': None, 'CancelInitiated': False, 'ImmediateOrCancel': False, 'IsConditional': False, 'Condition': 'NONE', 'ConditionTarget': 0.0}}
 
@@ -106,7 +101,7 @@ def process_order_data(dict): #same
     return order_df
 
 
-def save_trade_data(trade_df, path_dict):   #same
+def save_trade_data(trade_df, path_dict):
     save_path = path_dict['test trade log']
 
     try:
@@ -132,7 +127,7 @@ def save_trade_data(trade_df, path_dict):   #same
         print('Order log is empty.')
 
 
-def format_df(input_df):    #Different!!!
+def format_df(input_df):
     #Note that this should only be used before high low open are stripped from the data
     # input_df = input_df[['Date', 'BTCClose']]
     formatted_df = input_df.drop_duplicates(subset='Date', inplace=False)
@@ -144,7 +139,7 @@ def format_df(input_df):    #Different!!!
     return formatted_df
 
 
-def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):    #parts of this had gotten commented out
+def fetch_historical_data(path_dict, market, start_date, end_date, bittrex_obj):
     # this function is useful as code is ran for the same period in backtesting several times consecutively,
     # and fetching from original CSV takes longer as it is a much larger file
 
@@ -315,34 +310,31 @@ def add_renko(mydata, blocksize):
     prices = mydata['BTCClose'].values  # returns an np price, faster
 
     indicator = np.empty_like(prices)
+    lagged_indicator = np.empty_like(prices)
 
-    indicator_value = 0
+    indicator_val = 0
     for i, price in enumerate(np.nditer(prices)):
+        last_indicator_val = indicator_val
         if i == 0:
             upper_thresh = price + blocksize
             lower_thresh = price - blocksize
         elif price <= lower_thresh: #create a down block
-            # if indicator_value > 0: #change in direction
-            #     indicator_value = -blocksize
-            #
-            # else:
-            indicator_value -= blocksize #continuing a downtrend
 
+            indicator_val -= blocksize #continuing a downtrend
             lower_thresh -= blocksize
             upper_thresh = lower_thresh + 3*blocksize
 
-        elif price >= upper_thresh:
-            # if indicator_value < 0:
-            #     indicator_value = blocksize #change in direction
-            # else:
-            indicator_value += blocksize #continuing an uptrend
+        elif price >= upper_thresh: #create an up block
 
+            indicator_val += blocksize #continuing an uptrend
             upper_thresh += blocksize
             lower_thresh = upper_thresh - 3*blocksize
 
-        indicator[i] = indicator_value
+        indicator[i] = indicator_val
+        lagged_indicator[i] = last_indicator_val
 
     mydata['Renko'] = indicator
+    # mydata["Last Renko"] = lagged_indicator
 
 
 def add_features(input_df): #This didnt exist in this file, added it from the broken
@@ -351,12 +343,12 @@ def add_features(input_df): #This didnt exist in this file, added it from the br
     # add_sma_as_column(input_df, base)
     # add_sma_as_column(input_df, int(base*8/5))
     # add_sma_as_column(input_df, int(base*13/5))
-    add_renko(input_df, 100)
+    add_renko(input_df, 70)
 
     input_df['BTCMACD'] = ta.trend.macd_diff(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = ta.momentum.rsi(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = input_df['BTCRSI'] - 50 #center at 0
-    input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
+    # input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
 
 
     input_df = format_df(input_df)
@@ -365,7 +357,11 @@ def add_features(input_df): #This didnt exist in this file, added it from the br
 #There a make stationary function here in the other file but its unused so I didnt add it made in. I believe stationary data is implemented line by line in the environment as it aquires new data
 
 
-def plot_data(df):  #same
+def plot_data(df):
+
+
+    # I had a ton of trouble getting the plots to look right with the dates.
+    # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
     assert not df.empty
     fig, ax = plt.subplots(1, 1)  # Create the figure
 
@@ -537,7 +533,7 @@ class SimulatedMarketEnv:
     def __init__(self, data, initial_investment=100):
         # data
         self.asset_data = data
-        self.n_indicators = 4
+        self.n_indicators = 3
 
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, self.n_asset = self.asset_data.shape
@@ -1190,7 +1186,7 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
         return info['cur_val']
 
 
-def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDBTC'):
+def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols='USDBTC'):
     # Mode should be a string, either train or test or run
     # maybe it would be helpful to run this through command line argv etc
 
@@ -1210,210 +1206,209 @@ def run_agent(mode, path_dict, start_date, end_date, num_episodes, symbols='USDB
     batch_size = 32  # sampleing from replay memory
     initial_investment = 100
 
-    if mode in ['train', 'test', 'add_train']:
-        print('Preparing data...')
-        #get my keys
-        with open(path_dict['secret']) as secrets_file:
-            keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
-            secrets_file.close()
+    print('Preparing data...')
+    #get my keys
+    with open(path_dict['secret']) as secrets_file:
+        keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
+        secrets_file.close()
 
-        my_bittrex2_0 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
+    my_bittrex2_0 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
-        market = symbols[0:3] + '-' + symbols[3:6]
+    market = symbols[0:3] + '-' + symbols[3:6]
 
-        df = fetch_historical_data(path_dict, market, start_date, end_date, my_bittrex2_0)  # oldest date info
-        # save_historical_data(path_dict, df)
+    df = fetch_historical_data(path_dict, market, start_date, end_date, my_bittrex2_0)  # oldest date info
+    # save_historical_data(path_dict, df)
 
-        print("ORIGINAL DATA: ")
-        print(df.head())
-        df = change_granulaty(df, 3)
-        add_features(df)
-        df = strip_open_high_low(df)
-        print("DATA TO RUN ON: ")
-        print(df.head())
+    print("ORIGINAL DATA: ")
+    print(df.head())
+    df = change_granulaty(df, 5)
+    add_features(df)
+    df = strip_open_high_low(df)
+    print("DATA TO RUN ON: ")
+    print(df.head())
 
-        data_to_fit = df.drop('Date', axis = 1).values
+    data_to_fit = df.drop('Date', axis = 1).values
 
-        sim_env = SimulatedMarketEnv(data_to_fit, initial_investment)
-        state_size = sim_env.state_dim
-        action_size = len(sim_env.action_space)
-        agent = DQNAgent(state_size, action_size)
-        my_scaler = get_scaler(sim_env)
-        if mode == 'test':
-            print('Testing...')
-            num_episodes = 5
-            # then load the previous scaler
-            with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-                my_scaler = pickle.load(f)
+    sim_env = SimulatedMarketEnv(data_to_fit, initial_investment)
+    state_size = sim_env.state_dim
+    action_size = len(sim_env.action_space)
+    agent = DQNAgent(state_size, action_size)
+    my_scaler = get_scaler(sim_env)
+    if mode == 'test':
+        print('Testing...')
+        num_episodes = 5
+        # then load the previous scaler
+        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+            my_scaler = pickle.load(f)
 
-            # make sure epsilon is not 1!
-            # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon_min = 0.0005
-            agent.epsilon = agent.epsilon_min
+        # make sure epsilon is not 1!
+        # no need to run multiple episodes if epsilon = 0, it's deterministic
+        agent.epsilon_min = 0.0005
+        agent.epsilon = agent.epsilon_min
 
-            # load trained weights
-            agent.load(f'{models_folder}/linear.npz')
-        elif mode == 'add_train':
-            # then load the previous scaler
-            with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-                my_scaler = pickle.load(f)
+        # load trained weights
+        agent.load(f'{models_folder}/linear.npz')
+    elif mode == 'add_train':
+        # then load the previous scaler
+        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+            my_scaler = pickle.load(f)
 
-            # load trained weights
-            agent.load(f'{models_folder}/linear.npz')
-            print('Last scalar and trained weights loaded.')
+        # load trained weights
+        agent.load(f'{models_folder}/linear.npz')
+        print('Last scalar and trained weights loaded.')
 
-        time_remaining = timedelta(hours=0)
-        market_roi = return_on_investment(df.BTCClose.iloc[-1], df.BTCClose.iloc[0])
-        print(f'The market changed by {market_roi} % over the designated period.')
+    time_remaining = timedelta(hours=0)
+    market_roi = return_on_investment(df.BTCClose.iloc[-1], df.BTCClose.iloc[0])
+    print(f'The market changed by {market_roi} % over the designated period.')
 
-        # play the game num_episodes times
-        for e in range(num_episodes):
+    # play the game num_episodes times
+    for e in range(num_episodes):
 
-            t0 = datetime.now()
+        t0 = datetime.now()
 
-            if e == num_episodes - 1:
-                val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
-            else:
-                val = play_one_episode(agent, sim_env, my_scaler, mode)
+        if e == num_episodes - 1:
+            val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
+        else:
+            val = play_one_episode(agent, sim_env, my_scaler, mode)
 
-            roi = return_on_investment(val, initial_investment)  # Transform to ROI
-            dt = datetime.now() - t0
-            # if not end_time in locals():    #initialize with a direct calculation
-            #     end_time = dt* (num_episodes - e)
-            # else:
-            time_remaining -= dt
-            time_remaining = time_remaining + \
-                (dt * (num_episodes - (e + 1)) - time_remaining) / (e + 1)
-            if e % 100 == 0 and mode in ['train', 'add_train']: # save the weights when we are done
-                # save the DQN
-                agent.save(f'{models_folder}/linear.npz')
-                print('DQN saved.')
-
-                print('Saving scaler...')
-                # save the scaler
-                with open(f'{models_folder}/scaler.pkl', 'wb') as f:
-                    pickle.dump(my_scaler, f)
-                print('Scaler saved.')
-
-            print(f"episode: {e + 1}/{num_episodes}, end value: {val:.2f}, episode roi: {roi:.2f}, time remaining: {time_remaining}")
-            portfolio_value.append(val)  # append episode end portfolio value
-
-        # save the weights when we are done
-        if mode in ['train', 'add_train']:
+        roi = return_on_investment(val, initial_investment)  # Transform to ROI
+        dt = datetime.now() - t0
+        # if not end_time in locals():    #initialize with a direct calculation
+        #     end_time = dt* (num_episodes - e)
+        # else:
+        time_remaining -= dt
+        time_remaining = time_remaining + \
+            (dt * (num_episodes - (e + 1)) - time_remaining) / (e + 1)
+        if e % 100 == 0 and mode in ['train', 'add_train']: # save the weights when we are done
             # save the DQN
             agent.save(f'{models_folder}/linear.npz')
             print('DQN saved.')
 
+            print('Saving scaler...')
             # save the scaler
             with open(f'{models_folder}/scaler.pkl', 'wb') as f:
                 pickle.dump(my_scaler, f)
             print('Scaler saved.')
-            # plot losses
-            plt.plot(agent.model.losses)
-            plt.show()
 
-        # save portfolio value for each episode
-        print('Saving rewards...')
-        np.save(f'{rewards_folder}/{mode}.npy', portfolio_value)
-        print('Rewards saved.')
+        print(f"episode: {e + 1}/{num_episodes}, end value: {val:.2f}, episode roi: {roi:.2f}, time remaining: {time_remaining}")
+        portfolio_value.append(val)  # append episode end portfolio value
 
-        plot_sim_trade_history(df, state_log)
+    # save the weights when we are done
+    if mode in ['train', 'add_train']:
+        # save the DQN
+        agent.save(f'{models_folder}/linear.npz')
+        print('DQN saved.')
 
-    else:
-        assert(mode == 'run')
+        # save the scaler
+        with open(f'{models_folder}/scaler.pkl', 'wb') as f:
+            pickle.dump(my_scaler, f)
+        print('Scaler saved.')
+        # plot losses
+        plt.plot(agent.model.losses)
+        plt.show()
 
-        #Prepare the agent
-        # load the previous scaler
-        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-            scaler = pickle.load(f)
+    # save portfolio value for each episode
+    print('Saving rewards...')
+    np.save(f'{rewards_folder}/{mode}.npy', portfolio_value)
+    print('Rewards saved.')
 
-        # make sure epsilon is not 1!
-        # Set to 0 for purely deterministic
-        agent.epsilon = agent.epsilon_min
+    plot_sim_trade_history(df, state_log)
 
-        # Price in USD, price per unit is $/BTC
+def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols='USDBTC'):
+    assert(mode == 'run')
 
-        is_USD = True
+    #Prepare the agent
+    # load the previous scaler
+    with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+        scaler = pickle.load(f)
 
-        log = pd.DataFrame()
+    # make sure epsilon is not 1!
+    # Set to 0 for purely deterministic
+    agent.epsilon = agent.epsilon_min
 
-        # Note that bittrex exchange is based in GMT 8 hours ahead of CA
-        trade_incomplete = True
+    # Price in USD, price per unit is $/BTC
 
-        # Enter a trade into the market.
-        # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
-        ticker = self.bittrex_obj_1_1.get_ticker(market)
-        price = ticker['result']['Last']
-        amount = amount / price  # Convert to the amount of BTC
+    is_USD = True
 
-        if is_USD:  # buy
-            trade_result = self.bittrex_obj_1_1.buy_limit(market, amount, round(price*1.0001, 3))
-            side = 'buying'
-        else:       # Sell
-            trade_result = my_bittrex1_1.sell_limit(market, amount, round(price*0.9999, 3) )
-            side = 'selling'
+    log = pd.DataFrame()
 
-        # Check that an order was entered
-        if not trade_result['success']:
-            print('Trade attempt failed')
-            print(trade_result['message'])
-            #Start again?
+    # Note that bittrex exchange is based in GMT 8 hours ahead of CA
+    trade_incomplete = True
 
-        print(f'Order for {side} {amount:.8f} {symbols[0:3]} at a price of {price:.3f} has been submitted to the market.')
-        order_uuid = trade_result['result']['uuid']
+    # Enter a trade into the market.
+    # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
+    ticker = self.bittrex_obj_1_1.get_ticker(market)
+    price = ticker['result']['Last']
+    amount = amount / price  # Convert to the amount of BTC
 
-        # Loop to see if the order has been filled
-        status = trade_is_executed(order_uuid, order_data, my_bittrex)
+    if is_USD:  # buy
+        trade_result = self.bittrex_obj_1_1.buy_limit(market, amount, round(price*1.0001, 3))
+        side = 'buying'
+    else:       # Sell
+        trade_result = my_bittrex1_1.sell_limit(market, amount, round(price*0.9999, 3) )
+        side = 'selling'
 
-        if status == True:
-            is_USD = not is_USD
-            print(f'Order has been filled. Id: {order_uuid}.')
+    # Check that an order was entered
+    if not trade_result['success']:
+        print('Trade attempt failed')
+        print(trade_result['message'])
+        #Start again?
+
+    print(f'Order for {side} {amount:.8f} {symbols[0:3]} at a price of {price:.3f} has been submitted to the market.')
+    order_uuid = trade_result['result']['uuid']
+
+    # Loop to see if the order has been filled
+    status = trade_is_executed(order_uuid, order_data, my_bittrex)
+
+    if status == True:
+        is_USD = not is_USD
+        print(f'Order has been filled. Id: {order_uuid}.')
 
 
-        print(f'Attempt was not filled. Attempting to order again.')
+    print(f'Attempt was not filled. Attempting to order again.')
 
-        dt = datetime.now() - start_time  # note that this include the time to run a small amount of code
+    dt = datetime.now() - start_time  # note that this include the time to run a small amount of code
 
-        try: #Some weird error here that I have not been able to recreate. Added print statements for debugging if it occurs again
-            order_data['result']['Order Duration'] = dt.total_seconds()
-        except TypeError:
-            print(dt)
-            print(dt.total_seconds())
-        trade = process_order_data(order_data)
-        log = log.append(trade, ignore_index=True)
-        # log.reset_index(inplace=True)
+    try: #Some weird error here that I have not been able to recreate. Added print statements for debugging if it occurs again
+        order_data['result']['Order Duration'] = dt.total_seconds()
+    except TypeError:
+        print(dt)
+        print(dt.total_seconds())
+    trade = process_order_data(order_data)
+    log = log.append(trade, ignore_index=True)
+    # log.reset_index(inplace=True)
 
-        # load trained weights
-        agent.load(f'{models_folder}/linear.npz')
+    # load trained weights
+    agent.load(f'{models_folder}/linear.npz')
 
-        # Loop to play one episode
-        t0 = datetime.now()
+    # Loop to play one episode
+    t0 = datetime.now()
 
-        while True:
-            # Fetch new data
-            candle_dict = my_bittrex1_1.get_candles('USD-BTC', 'minute')
-            if candle_dict['success']:
-                new_df = process_candle_dict(candle_dict)
-            else:
-                print("Failed to get candle data")
-                continue
+    while True:
+        # Fetch new data
+        candle_dict = my_bittrex1_1.get_candles('USD-BTC', 'minute')
+        if candle_dict['success']:
+            new_df = process_candle_dict(candle_dict)
+        else:
+            print("Failed to get candle data")
+            continue
 
-            df = df.append(new_df)
-            df = df.drop_duplicates(['Date'])
-            df = df.sort_values(by='Date')
-            df.reset_index(inplace=True, drop=True)
+        df = df.append(new_df)
+        df = df.drop_duplicates(['Date'])
+        df = df.sort_values(by='Date')
+        df.reset_index(inplace=True, drop=True)
 
-            if first_check:
-                market_start = price
-                first_check = False
+        if first_check:
+            market_start = price
+            first_check = False
 
-            # This allows for accessing by index
-            # df.reset_index(inplace=True, drop=True) necessary for plotting
+        # This allows for accessing by index
+        # df.reset_index(inplace=True, drop=True) necessary for plotting
 
-            return_on_investment = return_on_investment(account_value, 100)
-            print('Account Return: ', return_on_investment, ' %')
-            market_performance = return_on_investment(price, market_start)
-            print('Market Performance: ', market_performance, ' %')
+        return_on_investment = return_on_investment(account_value, 100)
+        print('Account Return: ', return_on_investment, ' %')
+        market_performance = return_on_investment(price, market_start)
+        print('Market Performance: ', market_performance, ' %')
 
 
 if __name__ == '__main__':
@@ -1459,14 +1454,18 @@ if __name__ == '__main__':
         # start = datetime(2019,1, 1)
         # end = datetime(2019, 2, 1)
         start = datetime(2020, 3, 25)
-        end = datetime(2020, 4, 3)
+        end = datetime(2020, 4, 4)
         # end = datetime.now() - timedelta(hours = 6)
 
     elif mode == 'test':
         # start = datetime(2019,12, 14)
-        start = datetime(2020, 3, 25)
         # end = datetime(2019, 12, 28)
-        end = datetime(2020, 4, 3)
+
+        # start = datetime(2020, 3, 25)
+        # end = datetime(2020, 4, 3)
+
+        start = datetime(2018, 3, 1)
+        end = datetime(2018, 4, 1)
 
 
-    run_agent(mode, paths, start, end, 1000)
+    run_agent_sim(mode, paths, start, end, 100)
