@@ -1,20 +1,10 @@
 from bittrex.bittrex import *
-from bittrex_tools import *
+from main import *
 import pandas as pd
 from datetime import datetime, timedelta
 import json
 
-
-symbols = 'BTCUSD' #Example: 'BTCUSD'
-
-paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
-         'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols + '.csv',
-         'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-         'rewards': 'agent_rewards',
-         'models': 'agent_models',
-         'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
-
-bittrex_market = BittrexMarketEnv(5)
+bittrex_market = BittrexExchage(paths, 5)
 
 num_trades = 5
 

@@ -18,14 +18,13 @@ import ta
 import math
 
 from statistics import mean
-
 from sklearn.preprocessing import StandardScaler
-import warnings
+
 
 """Whats Bruce working on?
+-get all plots to show at the same time
 -breaking code apart into files, better file management, more official commenting
 -better data
--Benchmarking functions (test simple strategies)
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -change feature engineering to better represent how feature engineering works in real time
 -Start regularly scraping data: volume, spread, and sentiment for future training
@@ -87,52 +86,6 @@ def ROI(initial, final):
     # For example, a 10% increase followed by a 10% decrease is truly a 1% decrease over time (100 -> 110 -> 99)
     # Arithmetic ROI would show an overall trend of 0%, but log ROI properly computes this to be -1%
     #return round(np.log(final/initial), 4) *100
-
-def process_order_data(dict):
-    # Example input: {'success': True, 'message': '',
-    #'result': {'AccountId': None, 'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC', 'Type': 'LIMIT_SELL', 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Limit': 1.3, 'Reserved': None, 'ReserveRemaining': None, 'CommissionReserved': None, 'CommissionReserveRemaining': None, 'CommissionPaid': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722, 'Opened': '2019-11-19T07:42:48.85', 'Closed': '2019-11-19T07:42:48.85', 'IsOpen': False, 'Sentinel': None, 'CancelInitiated': False, 'ImmediateOrCancel': False, 'IsConditional': False, 'Condition': 'NONE', 'ConditionTarget': 0.0}}
-
-    # in order to construct a df, the values of the dict cannot be scalars, must be lists, so convert to lists
-    results = {}
-    for key in dict['result']:
-        results[key] = [dict['result'][key]]
-    order_df = pd.DataFrame(results)
-
-    order_df.drop(columns=['AccountId', 'Reserved', 'ReserveRemaining', 'CommissionReserved', 'CommissionReserveRemaining',
-                           'Sentinel', 'IsConditional', 'Condition', 'ConditionTarget', 'ImmediateOrCancel', 'CancelInitiated'], inplace=True)
-
-    order_df.reset_index(inplace=True, drop=True)
-    # dates into datetimess
-    order_df.Closed = pd.to_datetime(order_df.Closed, format="%Y-%m-%dT%H:%M:%S")
-    order_df.Opened = pd.to_datetime(order_df.Opened, format="%Y-%m-%dT%H:%M:%S")
-
-    return order_df
-
-
-def save_trade_data(trade_df, path_dict):
-    save_path = path_dict['test trade log']
-
-    try:
-        def dateparse(x):
-            try:
-                return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-            except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
-                return datetime(year = 2000, month = 1, day = 1)
-
-        old_df = pd.read_csv(save_path, parse_dates=['Opened', 'Closed'], date_parser=dateparse)
-
-        trade_df = trade_df.append(old_df)
-        trade_df.sort_values(by='Opened', inplace=True)
-        trade_df.reset_index(inplace=True, drop=True)
-
-        trade_df['Closed'] = trade_df['Closed'].dt.strftime("%Y-%m-%d %I-%p-%M")
-        trade_df['Opened'] = trade_df['Opened'].dt.strftime("%Y-%m-%d %I-%p-%M")
-
-        trade_df.to_csv(save_path, index=False)
-        print('Data written to test trade log.')
-
-    except KeyError:
-        print('Order log is empty.')
 
 
 def format_df(input_df):
@@ -262,7 +215,7 @@ def strip_open_high_low(input_df):
     return input_df
 
 
-def save_historical_data(path_dict, df):    #same
+def save_historical_data(path_dict, df):
     # This function writes the information in the original format to the csv file
     # including new datapoints that have been fetched
 
@@ -291,62 +244,71 @@ def save_historical_data(path_dict, df):    #same
     print('Data written.')
 
 
-def add_sma_as_column(mydata, p):
-    # p is a number
-    price = mydata['BTCClose'].values  # returns an np price, faster
-
-    sma = np.empty_like(price)
-    for i, item in enumerate(np.nditer(price)):
-        if i == 0:
-            sma[i] = item
-        elif i < p:
-            sma[i] = price[0:i].mean()
-        else:
-            sma[i] = price[(i - p):i].mean()
-
-    # subtract
-    indicator = np.empty_like(sma)
-    for i, item in enumerate(np.nditer(price)):
-        indicator[i] = sma[i] - price[i]
-
-    mydata['SMA_' + str(p)] = indicator  # modifies the input df
-
-
-def add_renko(mydata, blocksize):
-    #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
-    # p is a number
-    prices = mydata['BTCClose'].values  # returns an np price, faster
-
-    indicator = np.empty_like(prices)
-    lagged_indicator = np.empty_like(prices)
-
-    indicator_val = 0
-    for i, price in enumerate(np.nditer(prices)):
-        last_indicator_val = indicator_val
-        if i == 0:
-            upper_thresh = price + blocksize
-            lower_thresh = price - blocksize
-        elif price <= lower_thresh: #create a down block
-
-            indicator_val -= blocksize #continuing a downtrend
-            lower_thresh -= blocksize
-            upper_thresh = lower_thresh + 3*blocksize
-
-        elif price >= upper_thresh: #create an up block
-
-            indicator_val += blocksize #continuing an uptrend
-            upper_thresh += blocksize
-            lower_thresh = upper_thresh - 3*blocksize
-
-        indicator[i] = indicator_val
-        lagged_indicator[i] = last_indicator_val
-
-    mydata['Renko'] = indicator
-    # mydata["Last Renko"] = lagged_indicator
-
-
 def add_features(input_df): #This didnt exist in this file, added it from the broken
     """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
+
+    def add_sma_as_column(mydata, p):
+        # p is a number
+        price = mydata['BTCClose'].values  # returns an np price, faster
+
+        sma = np.empty_like(price)
+        for i, item in enumerate(np.nditer(price)):
+            if i == 0:
+                sma[i] = item
+            elif i < p:
+                sma[i] = price[0:i].mean()
+            else:
+                sma[i] = price[(i - p):i].mean()
+
+        # subtract
+        indicator = np.empty_like(sma)
+        for i, item in enumerate(np.nditer(price)):
+            indicator[i] = sma[i] - price[i]
+
+        mydata['SMA_' + str(p)] = indicator  # modifies the input df
+
+    def add_renko(mydata, blocksize):
+        #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
+        # p is a number
+        prices = mydata['BTCClose'].values  # returns an np price, faster
+
+        renko = np.empty_like(prices)
+
+        indicator_val = 0
+        #Loop to calculate the renko value at each data point
+        for i, price in enumerate(np.nditer(prices)):
+            if i == 0:
+                upper_thresh = price + blocksize
+                lower_thresh = price - blocksize
+            elif price <= lower_thresh: #create a down block
+
+                indicator_val -= blocksize #continuing a downtrend
+                lower_thresh -= blocksize
+                upper_thresh = lower_thresh + 3*blocksize
+
+            elif price >= upper_thresh: #create an up block
+
+                indicator_val += blocksize #continuing an uptrend
+                upper_thresh += blocksize
+                lower_thresh = upper_thresh - 3*blocksize
+
+            renko[i] = indicator_val
+
+        period = 2
+        indicator = np.empty_like(prices)
+
+        #Loop to interpret the renko to be more useful
+        for i, item in enumerate(renko):
+            if i == 0:
+                indicator[i] = item
+            elif i < period:
+                indicator[i] = renko[0:i].mean()
+            else:
+                indicator[i] = renko[(i - period):i].mean() - renko[i-period]
+
+
+        mydata['Renko'] = indicator
+
     # base = 50
     # add_sma_as_column(input_df, base)
     # add_sma_as_column(input_df, int(base*8/5))
@@ -360,9 +322,6 @@ def add_features(input_df): #This didnt exist in this file, added it from the br
 
 
     input_df = format_df(input_df)
-
-
-#There a make stationary function here in the other file but its unused so I didnt add it made in. I believe stationary data is implemented line by line in the environment as it aquires new data
 
 
 def plot_data(df):
@@ -418,20 +377,6 @@ def plot_sim_trade_history(df, log, roi=0): #updated based on the "broken file."
     plt.show()
 
 
-def process_trade_history(dict):    #Same
-    # Example input: {'success': True, 'message': '', 'result': [{'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC', 'TimeStamp': '2019-11-19T07:42:48.85', 'OrderType': 'LIMIT_SELL', 'Limit': 1.3, 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Commission': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722, 'IsConditional': False, 'Condition': '', 'ConditionTarget': 0.0, 'ImmediateOrCancel': False, 'Closed': '2019-11-19T07:42:48.85'}]}
-
-    trade_df = pd.DataFrame(dict['result'])
-    trade_df.drop(columns=['IsConditional', 'Condition', 'ConditionTarget',
-                           'ImmediateOrCancel', 'Closed'], inplace=True)
-
-    trade_df.reset_index(inplace=True, drop=True)
-    # dates into datetimess
-    trade_df.TimeStamp = pd.to_datetime(trade_df.TimeStamp, format="%Y-%m-%dT%H:%M:%S")
-    # trade_df.Closed = pd.to_datetime(trade_df.Closed, format="%Y-%m-%dT%H:%M:%S")
-    return trade_df
-
-
 def get_scaler(env):
     # return scikit-learn scaler object to scale the states
     # Note: you could also populate the replay buffer here
@@ -451,155 +396,7 @@ def get_scaler(env):
     scaler = StandardScaler()
     scaler.fit(states)
 
-    return scaler   #didnt check cause I know I didnt change
-
-
-class LinearModel:
-    """ A linear regression model """
-
-    def __init__(self, input_dim, n_action):
-        self.W = np.random.randn(input_dim, n_action) / \
-            np.sqrt(input_dim)  # Random matrix
-        self.b = np.zeros(n_action)  # Vector of zeros
-
-        # momentum terms
-        self.vW = 0
-        self.vb = 0
-
-        self.losses = []
-
-    def predict(self, X):
-        # make sure X is N x D
-        # throw error if X not 2D to abide by (skikitlearn dimensionality convention)
-        assert(len(X.shape) == 2)
-        return X.dot(self.W) + self.b
-
-    def sgd(self, X, Y, learning_rate=0.005, momentum=0.9):
-        """One step of gradient descent.
-        learning rate was originally 0.01
-        u = momentum term
-        n = learning rate
-        g(t) = gradient
-        theta = generic parameter
-        v(t) = u*v(t-1) - n*g(t)
-        let theta = T
-        T(t) = T(t-1) + v(t), T = {W,b)}
-        """
-
-        # make sure X is N x D
-        assert(len(X.shape) == 2)
-
-        # the loss values are 2-D
-        # normally we would divide by N only
-        # but now we divide by N x K
-        num_values = np.prod(Y.shape)
-
-        # do one step of gradient descent
-        # we multiply by 2 to get the exact gradient
-        # (not adjusting the learning rate)
-        # i.e. d/dx (x^2) --> 2x
-        with warnings.catch_warnings(record=True) as w:
-            # Cause all warnings to always be triggered.
-            warnings.simplefilter("always")
-            Yhat = self.predict(X)
-            gW = 2 * X.T.dot(Yhat - Y) / num_values
-            gb = 2 * (Yhat - Y).sum(axis=0) / num_values
-
-        # update momentum terms
-        self.vW = momentum * self.vW - learning_rate * gW
-        self.vb = momentum * self.vb - learning_rate * gb
-
-        # update params
-        self.W += self.vW
-        self.b += self.vb
-
-        mse = np.mean((Yhat - Y)**2)  # Using the mean squared error (This was from the class code, started throwing runtime errors)
-        # mse = ((Yhat - Y)**2).mean(axis = None) #still throws run time errors
-        self.losses.append(mse)
-
-    def load_weights(self, filepath):
-        npz = np.load(filepath)
-        self.W = npz['W']
-        self.b = npz['b']
-
-    def save_weights(self, filepath):
-        np.savez(filepath, W=self.W, b=self.b)  #didnt check cause I know I didnt change
-
-
-class DQNAgent(object):
-    """ Responsible for taking actions, learning from them, and taking actions
-    such that they will maximize future rewards
-    """
-
-    def __init__(self, state_size, action_size):    #same
-
-        # These two correspond to number of inputs and outputs of the neural network respectively
-        self.state_size = state_size
-        self.action_size = action_size
-
-        self.gamma = 0.95  # discount rate
-        self.epsilon = 1.0  # exploration rate
-        self.epsilon_min = 0.005  # originally .01. The version here is set for training
-        self.epsilon_decay = 0.95 # originall .995
-        self.learning_rate = .004
-        # Get an instance of our model
-        self.model = LinearModel(state_size, action_size)
-
-    def act(self, state):
-        # This is the policy
-        if np.random.rand() <= self.epsilon:
-            return np.random.choice(self.action_size)
-        act_values = self.model.predict(state)  # Greedy case
-
-        # Take argmax over model predictions to get action with max. Q value.
-        # Output of model is batch sized by num of outputs to index by 0
-        return np.argmax(act_values[0])  # returns action (same)
-
-    def train(self, state, action, reward, next_state, done):
-        # This func. does the learning
-        if done:
-            target = reward
-        else:
-            target = reward + self.gamma * \
-                np.amax(self.model.predict(next_state), axis=1)
-
-        target_full = self.model.predict(state)
-        target_full[0, action] = target
-
-        # Run one training step of gradient descent.
-        self.model.sgd(state, target_full, self.learning_rate)
-
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
-    def load(self, name):
-        self.model.load_weights(name)
-
-    def save(self, name):
-        self.model.save_weights(name)
-
-
-class BenchMarker:
-    """For now, this just uses the Renko strategy. Eventually,
-    this should take in a string parameter that dictates which
-    benchmarking strategy is used.
-
-    Be careful with where each feature is in the state, as this class reads in
-    features from the state by their position.
-    The action to return should be a list of actions."""
-
-    def __init__(state_size, action_size, block_size):
-        self.action_size = action_size
-        self.state_size = state_size
-
-        self.block_size = block_size
-
-    def act(self, state):
-        thresh = 5 #change this
-        if state[2] > thresh: #change this to match the position in the state
-            return 1
-        else:
-            return 0
+    return scaler
 
 
 def play_one_episode(agent, env, scaler, is_train, record=False):
@@ -617,7 +414,6 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
     done = False
 
     while not done:
-
         action = agent.act(state)
         # print(action)
         next_state, val, reward, done, info = env.step(action)
@@ -627,7 +423,7 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
                 [dict(zip(log_columns, [val]))]), ignore_index=True)
 
         next_state = scaler.transform([next_state])
-        if is_train in ['train', 'add_train']:
+        if is_train in ['train']:
             agent.train(state, action, reward, next_state, done)
         state = next_state
 
@@ -680,10 +476,10 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols='
 
     data_to_fit = df.drop('Date', axis = 1).values
 
-    sim_env = SimulatedMarketEnv(data_to_fit, initial_investment)
+    sim_env = SimulatedCryptoExchange(data_to_fit, initial_investment)
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
-    agent = DQNAgent(state_size, action_size)
+    dqn_agent = DQNAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)
     if mode == 'test':
         print('Testing...')
@@ -694,19 +490,11 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols='
 
         # make sure epsilon is not 1!
         # no need to run multiple episodes if epsilon = 0, it's deterministic
-        agent.epsilon_min = 0.0005
-        agent.epsilon = agent.epsilon_min
+        dqn_agent.epsilon_min = 0.0005
+        dqn_agent.epsilon = dqn_agent.epsilon_min
 
         # load trained weights
-        agent.load(f'{models_folder}/linear.npz')
-    elif mode == 'add_train':
-        # then load the previous scaler
-        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-            my_scaler = pickle.load(f)
-
-        # load trained weights
-        agent.load(f'{models_folder}/linear.npz')
-        print('Last scalar and trained weights loaded.')
+        dqn_agent.load(f'{models_folder}/linear.npz')
 
     time_remaining = timedelta(hours=0)
     market_roi = return_on_investment(df.BTCClose.iloc[-1], df.BTCClose.iloc[0])
@@ -718,21 +506,19 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols='
         t0 = datetime.now()
 
         if e == num_episodes - 1:
-            val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
+            val, state_log = play_one_episode(dqn_agent, sim_env, my_scaler, mode, True)
         else:
-            val = play_one_episode(agent, sim_env, my_scaler, mode)
+            val = play_one_episode(dqn_agent, sim_env, my_scaler, mode)
 
         roi = return_on_investment(val, initial_investment)  # Transform to ROI
         dt = datetime.now() - t0
-        # if not end_time in locals():    #initialize with a direct calculation
-        #     end_time = dt* (num_episodes - e)
-        # else:
+
         time_remaining -= dt
         time_remaining = time_remaining + \
             (dt * (num_episodes - (e + 1)) - time_remaining) / (e + 1)
-        if e % 100 == 0 and mode in ['train', 'add_train']: # save the weights when we are done
+        if e % 100 == 0 and mode in ['train']: # save the weights when we are done
             # save the DQN
-            agent.save(f'{models_folder}/linear.npz')
+            dqn_agent.save(f'{models_folder}/linear.npz')
             print('DQN saved.')
 
             print('Saving scaler...')
@@ -745,9 +531,9 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols='
         portfolio_value.append(val)  # append episode end portfolio value
 
     # save the weights when we are done
-    if mode in ['train', 'add_train']:
+    if mode in ['train']:
         # save the DQN
-        agent.save(f'{models_folder}/linear.npz')
+        dqn_agent.save(f'{models_folder}/linear.npz')
         print('DQN saved.')
 
         # save the scaler
@@ -755,8 +541,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols='
             pickle.dump(my_scaler, f)
         print('Scaler saved.')
         # plot losses
-        plt.plot(agent.model.losses)
-        plt.show()
+        plt.plot(dqn_agent.model.losses) #this plots the index on the x axis and he loss on the y
 
     # save portfolio value for each episode
     print('Saving rewards...')
@@ -764,6 +549,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols='
     print('Rewards saved.')
 
     plot_sim_trade_history(df, state_log)
+
 
 def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols='USDBTC'):
     assert(mode == 'run')
@@ -864,29 +650,28 @@ def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols
 #cryptodatadownload has gaps
 #Place to download: https://www.kaggle.com/jessevent/all-crypto-currencies iSinkInWater, brucejamesiverson@gmail.com, I**********
 os = 'windows' #linux or windows
-des_granularity = 1 #in minutes
-symbols = 'BTCUSD' #Example: 'BTCUSD'
+symbols = ['BTCUSD'] #Example: 'BTCUSD'
 
 #The below should be updated to be simplified to use parent directory? unsure how that works...
 #https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
 
 if os == 'linux':
     paths = {'downloaded history': '/home/bruce/AlgoTrader/BittrexTrader/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv',
-    'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols + '.csv',
+    'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols[0] + '.csv',
     'secret': "/home/bruce/Documents/crypto_data/secrets.json",
     'rewards': 'agent_rewards',
     'models': 'agent_models',
-    'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
+    'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols[0] + '.csv'}
 
     # TODO: add a loop here that appends the asset folders
 
 elif os == 'windows':
     paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
-    'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols + '.csv',
+    'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols[0] + '.csv',
     'secret': "/Users/biver/Documents/crypto_data/secrets.json",
     'rewards': 'agent_rewards',
     'models': 'agent_models',
-    'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
+    'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols[0] + '.csv'}
 else:
     print('Unknown OS passed when defining the paths')  # this should throw and error
     assert(os in ['windows', 'linux'])
@@ -903,23 +688,23 @@ if __name__ == '__main__':
     assert mode in ["train", "test", "run"]
 
 
-    if mode in ['train', 'add_train']:
+    if mode in ['train']:
         #train
         # start = datetime(2019,1, 1)
         # end = datetime(2019, 2, 1)
-        start = datetime(2020, 3, 25)
-        end = datetime(2020, 4, 4)
+        start = datetime(2020, 3, 27)
+        end = datetime(2020, 4, 5)
         # end = datetime.now() - timedelta(hours = 6)
 
     elif mode == 'test':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
 
-        start = datetime(2020, 3, 25)
-        end = datetime(2020, 4, 3)
+        # start = datetime(2020, 3, 27)
+        # end = datetime(2020, 4, 5)
 
-        # start = datetime(2018, 3, 1)
-        # end = datetime(2018, 4, 1)
+        start = datetime(2018, 3, 1)
+        end = datetime(2018, 4, 1)
 
 
-    run_agent_sim(mode, paths, start, end, 100)
+    run_agent_sim(mode, paths, start, end, 800)

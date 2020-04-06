@@ -28,9 +28,6 @@ df = df[df['Date'] >= start]
 df = df[df['Date'] <= end]
 df = format_df(df)
 
-# def save_historical_data(path_dict, df):    #same
-    # This function writes the information in the original format to the csv file
-    # including new datapoints that have been fetched
 
 print('Writing data to CSV.')
 

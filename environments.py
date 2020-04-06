@@ -1,7 +1,12 @@
 import itertools
 import numpy as np
+import json
+from bittrex.bittrex import *
+from main import *
+import math
 
-class SimulatedMarketEnv:
+
+class SimulatedCryptoExchange:
     """
     A multi-asset trading environment.
     For now this has been adopted for only one asset.
@@ -16,7 +21,7 @@ class SimulatedMarketEnv:
     def __init__(self, data, initial_investment=100):
         # data
         self.asset_data = data
-        self.n_indicators = 3
+        self.n_indicators = 3 #This HAS to match the number of features that have been
 
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, self.n_asset = self.asset_data.shape
@@ -217,8 +222,7 @@ class SimulatedMarketEnv:
 
         self.period_since_trade += 1    #Changed this while I was high, used to be in an else statement
 
-
-class BittrexMarketEnv:
+class BittrexExchange:
     """
     In progress.
 
@@ -231,6 +235,7 @@ class BittrexMarketEnv:
             keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
             secrets_file.close()
 
+        #Need both versions of the interface as they each provide certain useful functions
         self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
         self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
         # data
@@ -275,13 +280,13 @@ class BittrexMarketEnv:
 
         self.cancel_all_orders()
 
-        self._get_balances()
+        self.get_balances()
 
-        #Put all money into USD
-        if self.assets_owned[0] > 0:
-            sucess = False
-            while not success:
-                success = self._trade(-self.assets_owned[0])
+        # #Put all money into USD
+        # if self.assets_owned[0] > 0:
+        #     sucess = False
+        #     while not success:
+        #         success = self._trade(-self.assets_owned[0])
 
 
         self.assets_owned = np.zeros(self.n_asset)
@@ -293,11 +298,7 @@ class BittrexMarketEnv:
         return self._get_state(), self._return_val() # Return the state vector (same as obervation for now)
 
 
-    def _calculate_indicators(self):
-        pass
-
-
-    def _get_prices(self):
+    def get_prices(self):
         print('Fetching prices.')
         while True:
             ticker = self.bittrex_obj_1_1.get_ticker('USD-BTC')
@@ -308,9 +309,47 @@ class BittrexMarketEnv:
                 print(ticker['message'])
                 time.sleep(1)
             else:
+                self.asset_prices = ticker['result']['Last']
                 break
 
-                self.asset_prices = [ticker['result']['Last']]
+
+    def get_balances(self):
+        print('Fetching account balances.')
+        self.assets_owned = np.zeros(self.n_asset)
+        while True:
+            check1 = False
+            balance_response = self.bittrex_obj_1_1.get_balance('BTC')
+            if balance_response['success']:
+                amount = balance_response['result']['Balance']
+                #Find a more legant way of checking if 'None'
+                if amount is None:
+                    self.assets_owned[0] = 0
+                else: self.assets_owned[0] = amount
+
+                # try:
+                #     if self.assets_owned[0] > 0:
+                #         pass
+                # except TypeError: #BTC_balance is none
+
+                check1 = True
+
+
+            balance_response = self.bittrex_obj_1_1.get_balance('USD')
+            if balance_response['success']:
+                self.USD = balance_response['result']['Balance']
+
+                #Find a more legant way of checking if 'None'
+                try:
+                    if self.USD > 0:
+                        pass
+                except TypeError: #BTC_balance is none
+                        self.USD = 0
+                if check1:
+                    break
+
+
+    def _calculate_indicators(self):
+        pass
 
 
     def _get_state(self):
@@ -328,43 +367,10 @@ class BittrexMarketEnv:
 
 
     def _return_val(self):
-        self._get_balances()
-        self._get_prices()
+        self.get_balances()
+        self.get_prices()
 
         return self.assets_owned.dot(self.asset_prices) + self.USD
-
-
-    def _get_balances(self):
-        print('Fetching account balances.')
-        self.assets_owned = np.zeros(self.n_asset)
-        while True:
-            check1 = False
-            balance_response = self.bittrex_obj_1_1.get_balance('BTC')
-            if balance_response['success']:
-                self.assets_owned[0] = balance_response['result']['Balance']
-
-                #Find a more legant way of checking if 'None'
-                try:
-                    if self.assets_owned[0] > 0:
-                        pass
-                except TypeError: #BTC_balance is none
-                        self.assets_owned[0] = 0
-
-                check1 = True
-
-
-            balance_response = self.bittrex_obj_1_1.get_balance('USD')
-            if balance_response['success']:
-                self.USD = balance_response['result']['Balance']
-
-                #Find a more legant way of checking if 'None'
-                try:
-                    if self.USD > 0:
-                        pass
-                except TypeError: #BTC_balance is none
-                        self.USD = 0
-                if check1:
-                    break
 
 
     def _fetch_candle_data(self, market, start_date, end_date):
@@ -445,7 +451,7 @@ class BittrexMarketEnv:
         return df
 
 
-    def _cancel_all_orders(self):
+    def cancel_all_orders(self):
         print('Canceling all orders.')
         open_orders = self.bittrex_obj_1_1.get_open_orders('USD-BTC')
         if open_orders['success']:
@@ -468,7 +474,7 @@ class BittrexMarketEnv:
 
         #For now, assuming bitcoin
         #First fulfill the required USD
-        self._get_prices()
+        self.get_prices()
 
         # Note that bittrex exchange is based in GMT 8 hours ahead of CA
 
@@ -509,6 +515,56 @@ class BittrexMarketEnv:
                 order_data['result']['Order Duration'] = dt
                 trade = process_order_data(order_data)
                 # print(trade)
+
+
+    def process_order_data(dict):
+        """Needs to be updated"""
+        # Example input: {'success': True, 'message': '',
+        #'result': {'AccountId': None, 'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC', 'Type': 'LIMIT_SELL', 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Limit': 1.3, 'Reserved': None, 'ReserveRemaining': None, 'CommissionReserved': None, 'CommissionReserveRemaining': None, 'CommissionPaid': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722, 'Opened': '2019-11-19T07:42:48.85', 'Closed': '2019-11-19T07:42:48.85', 'IsOpen': False, 'Sentinel': None, 'CancelInitiated': False, 'ImmediateOrCancel': False, 'IsConditional': False, 'Condition': 'NONE', 'ConditionTarget': 0.0}}
+
+        # in order to construct a df, the values of the dict cannot be scalars, must be lists, so convert to lists
+        results = {}
+        for key in dict['result']:
+            results[key] = [dict['result'][key]]
+        order_df = pd.DataFrame(results)
+
+        order_df.drop(columns=['AccountId', 'Reserved', 'ReserveRemaining', 'CommissionReserved', 'CommissionReserveRemaining',
+                               'Sentinel', 'IsConditional', 'Condition', 'ConditionTarget', 'ImmediateOrCancel', 'CancelInitiated'], inplace=True)
+
+        order_df.reset_index(inplace=True, drop=True)
+        # dates into datetimess
+        order_df.Closed = pd.to_datetime(order_df.Closed, format="%Y-%m-%dT%H:%M:%S")
+        order_df.Opened = pd.to_datetime(order_df.Opened, format="%Y-%m-%dT%H:%M:%S")
+
+        return order_df
+
+
+    def save_trade_data(trade_df, path_dict):
+        """Needs to be updated"""
+        save_path = path_dict['test trade log']
+
+        try:
+            def dateparse(x):
+                try:
+                    return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+                except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
+                    return datetime(year = 2000, month = 1, day = 1)
+
+            old_df = pd.read_csv(save_path, parse_dates=['Opened', 'Closed'], date_parser=dateparse)
+
+            trade_df = trade_df.append(old_df)
+            trade_df.sort_values(by='Opened', inplace=True)
+            trade_df.reset_index(inplace=True, drop=True)
+
+            trade_df['Closed'] = trade_df['Closed'].dt.strftime("%Y-%m-%d %I-%p-%M")
+            trade_df['Opened'] = trade_df['Opened'].dt.strftime("%Y-%m-%d %I-%p-%M")
+
+            trade_df.to_csv(save_path, index=False)
+            print('Data written to test trade log.')
+
+        except KeyError:
+            print('Order log is empty.')
+
 
     def _is_trade_executed(self, uuid):
         start_time = datetime.now()
@@ -555,3 +611,18 @@ class BittrexMarketEnv:
             #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
             #Calculate the changes needed for each asset
             delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
+
+
+    def process_trade_history(dict):
+        """This needs to be integrated"""
+        # Example input: {'success': True, 'message': '', 'result': [{'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC', 'TimeStamp': '2019-11-19T07:42:48.85', 'OrderType': 'LIMIT_SELL', 'Limit': 1.3, 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Commission': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722, 'IsConditional': False, 'Condition': '', 'ConditionTarget': 0.0, 'ImmediateOrCancel': False, 'Closed': '2019-11-19T07:42:48.85'}]}
+
+        trade_df = pd.DataFrame(dict['result'])
+        trade_df.drop(columns=['IsConditional', 'Condition', 'ConditionTarget',
+                               'ImmediateOrCancel', 'Closed'], inplace=True)
+
+        trade_df.reset_index(inplace=True, drop=True)
+        # dates into datetimess
+        trade_df.TimeStamp = pd.to_datetime(trade_df.TimeStamp, format="%Y-%m-%dT%H:%M:%S")
+        # trade_df.Closed = pd.to_datetime(trade_df.Closed, format="%Y-%m-%dT%H:%M:%S")
+        return trade_df

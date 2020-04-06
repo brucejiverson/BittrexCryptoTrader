@@ -20,3 +20,5 @@ market = symbols[3:6] + '-' + symbols[0:3]
 
 while True:
     df = fetch_historical_data(paths, market, start, end, my_bittrex)  #gets all data
+    save_historical_data(path_dict, df)
+    time.sleep(60*60*24*5)

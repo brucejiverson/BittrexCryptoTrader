@@ -42,4 +42,4 @@ mean_fill_time = filled_orders['Order Duration'].mean()
 std_fill_time = filled_orders['Order Duration'].std()
 
 print(f'Out of {n_attempts} attempts, {n_filled} were filled ({100*n_filled/n_attempts:.1f} %).')
-print(f'The mean time a successful order was filled was {mean_fill_time:.2f}, +- {2*std_fill_time:.2f}.')
+print(f'The mean time a successful order was filled was {mean_fill_time:.2f}, +- {2*std_fill_time:.2f} (95% confidence).')
