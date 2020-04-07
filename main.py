@@ -16,12 +16,16 @@ import pickle
 import itertools
 import ta
 import math
+import requests
+import urllib.request
 
 from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 
 """Whats Bruce working on?
+-change from "Date" column to "Timestamp"
+-understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 -get all plots to show at the same time
 -breaking code apart into files, better file management, more official commenting
 -better data
@@ -38,6 +42,9 @@ from sklearn.preprocessing import StandardScaler
 
 
 """DESIRED FEATURES
+-incorporate delayed trading (std dev?)
+-reevaluate how the agents and enviroment interract, make sure that it can scale for multiple agents
+-reevaluate using datetimes as index in dataframe
 -integrate sentiment with features
 -be clear about episode/epoch terminology
 -let the agent give two orders, a limit and stop
@@ -45,7 +52,6 @@ from sklearn.preprocessing import StandardScaler
 -model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
 -fabricate simple data to train on to validate learning
 -Data for multiple currencies
--understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 -Understand plotting losses. Possibly switch to plotting profitablilty over course of training
 
 Big Picture:
@@ -65,6 +71,7 @@ def maybe_make_dir(directory):
 
 
 def process_candle_dict(candle_dictionary):
+    # print(candle_dictionary)
     # Dataframe formatted the same as
     # V and BV refer to volume and base volume
     df = pd.DataFrame(candle_dictionary['result'])
@@ -90,44 +97,17 @@ def ROI(initial, final):
 
 
 def format_df(input_df):
-    #Note that this should only be used before high low open are stripped from the data
+    """This function formats the dataframe according to the assets that are in it. Needss to be updated to handle multiple assets.
+    Note that this should only be used before high low open are stripped from the data."""
     # input_df = input_df[['Date', 'BTCClose']]
     formatted_df = input_df.drop_duplicates(subset='Date', inplace=False)
     formatted_df = formatted_df[formatted_df['BTCClose'].notnull()]  # Remove non datapoints from the set
     formatted_df.sort_values(by='Date', inplace=True)   #This was causing a warning about future deprecation/changes to pandas
-    formatted_df.reset_index(inplace=True, drop=True)
     formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
+    formatted_df.reset_index(inplace=True, drop = True)
 
     return formatted_df
 
-def fetch_sentiment(limit):
-    """This function pulls sentiment data from the crypto fear and greed index. That data is updated daily.
-    This is the link to the website: https://alternative.me/crypto/fear-and-greed-index/#fng-history
-    The 'limit' argument is the number of data points to fetch (one for each day).
-    The given value is on a scale of 0 - 100, with 0 being extreme fear and 100 being extreme greed."""
-
-    url = "https://api.alternative.me/fng/?limit="+ str(limit) +"&date_format=us"
-
-    data = requests.get(url).json()["data"] #returns a list of dictionaries
-
-    sentiment_df = pd.DataFrame(data)
-
-    #Drop unnecessaary columns
-    sentiment_df.drop(columns = ["time_until_update", "value_classification"], inplace = True)
-    #Rename the columns
-    sentiment_df.rename(columns={'timestamp': 'Date', 'value': 'Value'}, inplace = True)
-    #Format the dates
-    sentiment_df['Date'] = pd.to_datetime(sentiment_df["Date"], format = "%m-%d-%Y")
-    #Convert value to int, and center the sentiment value at 0
-    sentiment_df["Value"] = sentiment_df['Value'].apply(int)
-    sentiment_df['Value'] = sentiment_df['Value'] - 50
-
-    for i, row in sentiment_df.iterrows():
-        for minute in range(1, 60):
-            new_row = {'Date': , "Value": float('nan')}
-
-    # print(sentiment_df)
-    return sentiment_df
 
 def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj):
     """This function pulls data from the exchange, the cumulative repository, and the data download in that order
@@ -138,19 +118,18 @@ def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj)
     cols = ["Date"]
     for market in markets:
         for item in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            cols.append(market[0:3] + item)
+            cols.append(market[3:6] + item)
 
     df = pd.DataFrame(columns=cols)
 
     # Fetch candle data from bittrex
     if end_date > datetime.now() - timedelta(days=9):
         for market in markets:
-            print('Market: ' + market)
+            print('Fetching ' + market + ' historical data from the exchange.')
             attempts = 0
             while True:
                 print('Fetching candles from Bittrex...')
-                candle_dict = bittrex_obj.get_candles(
-                    market, 'oneMin')
+                candle_dict = bittrex_obj.get_candles(market, 'oneMin')
 
                 if candle_dict['success']:
                     candle_df = process_candle_dict(candle_dict)
@@ -160,9 +139,10 @@ def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj)
                     print("Failed to get candle data.")
                     print(candle_dict)
                     time.sleep(2*attempts)
-                    attempts +=1
+                    attempts += 1
 
                     if attempts == 5:
+                        print('Exceeded maximum number of attempts.')
                         raise(TypeError)
                     print('Retrying...')
 
@@ -227,15 +207,20 @@ def filter_error_from_download_data(input_df):
 
 
 def change_df_granulaty(input_df, gran):
-    """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes)"""
+    """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes).
+    This could possibly be imporved in the future with the ".resample()" method."""
+
     print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
 
     if input_df['Date'].iloc[1] - input_df['Date'].iloc[0] == timedelta(minutes = 1): #verified this works
-        print('here')
-        return input_df.iloc[::gran, :]
+        input_df =  input_df.iloc[::gran, :]
+        input_df = format_df(input_df)
+        # print(input_df.head())
+        return input_df
     else:
         print('Granularity of df input to change_df_granularity was not 1 minute.')
         raise(ValueError)
+        return input_df
 
 
 def strip_df_open_high_low(input_df):
@@ -282,8 +267,10 @@ def save_historical_data(path_dict, df):
     print('Data written.')
 
 
-def add_features(input_df): #This didnt exist in this file, added it from the broken
+def add_features(input_df):
     """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
+
+    print('Constructing features...')
 
     def add_sma_as_column(mydata, p):
         # p is a number
@@ -304,6 +291,7 @@ def add_features(input_df): #This didnt exist in this file, added it from the br
             indicator[i] = sma[i] - price[i]
 
         mydata['SMA_' + str(p)] = indicator  # modifies the input df
+
 
     def add_renko(mydata, blocksize):
         #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
@@ -332,7 +320,7 @@ def add_features(input_df): #This didnt exist in this file, added it from the br
 
             renko[i] = indicator_val
 
-        period = 2
+        period = 5
         indicator = np.empty_like(prices)
 
         #Loop to interpret the renko to be more useful
@@ -345,19 +333,63 @@ def add_features(input_df): #This didnt exist in this file, added it from the br
                 indicator[i] = renko[(i - period):i].mean() - renko[i-period]
 
 
-        mydata['Renko'] = renko
+        mydata['Renko'] = indicator
+
+
+    def add_sentiment(mydata):
+        """This function pulls sentiment data from the crypto fear and greed index. That data is updated daily.
+        This is the link to the website: https://alternative.me/crypto/fear-and-greed-index/#fng-history
+        The 'limit' argument is the number of data points to fetch (one for each day).
+        The given value is on a scale of 0 - 100, with 0 being extreme fear and 100 being extreme greed."""
+
+
+        #Get the oldest date and figure out how long ago it was
+        days = (datetime.now() - mydata.Date.min()).days + 1 #validated this is correct
+        url = "https://api.alternative.me/fng/?limit="+ str(days) +"&date_format=us"
+
+        data = requests.get(url).json()["data"] #returns a list of dictionaries
+
+        sentiment_df = pd.DataFrame(data)
+
+        #Drop unnecessaary columns
+        sentiment_df.drop(columns = ["time_until_update", "value_classification"], inplace = True)
+        #Rename the columns
+        sentiment_df.rename(columns={'timestamp': 'Date', 'value': 'Value'}, inplace = True)
+        #Format the dates
+        sentiment_df['Date'] = pd.to_datetime(sentiment_df["Date"], format = "%m-%d-%Y")
+        #Convert value to int, and center the sentiment value at 0
+        sentiment_df["Value"] = sentiment_df['Value'].apply(int)
+        sentiment_df['Value'] = sentiment_df['Value'] - 50
+
+        #This should really be done with resample but I had a tough time getting it to work that way
+
+        sentiment = np.empty_like(mydata.BTCClose)
+
+        for i, row in mydata.iterrows():
+            #Checked that both dfs have pandas timestamp date datatypes
+            try:
+                sentiment[i] = sentiment_df[sentiment_df.Date == row.Date.floor(freq = 'D')].Value
+            except ValueError:
+                print('Index: ' + str(i))
+                print(sentiment)
+
+        # print("SENTIMENT VECTOR: : ")
+        # print(sentiment)
+        mydata['Sentiment'] = sentiment
+
 
     # base = 50
     # add_sma_as_column(input_df, base)
     # add_sma_as_column(input_df, int(base*8/5))
     # add_sma_as_column(input_df, int(base*13/5))
-    add_renko(input_df, 70)
+    # add_sentiment(input_df)
+
+    add_renko(input_df, 40)
 
     input_df['BTCMACD'] = ta.trend.macd_diff(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = ta.momentum.rsi(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = input_df['BTCRSI'] - 50 #center at 0
     # input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
-
 
     input_df = format_df(input_df)
 
@@ -506,7 +538,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
 
     print("ORIGINAL DATA: ")
     print(df.head())
-    df = change_df_granulaty(df, 5)
+    df = change_df_granulaty(df, 10)
     add_features(df)
     df = strip_df_open_high_low(df)
     print("DATA TO RUN ON: ")
@@ -528,7 +560,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
 
         # make sure epsilon is not 1!
         # no need to run multiple episodes if epsilon = 0, it's deterministic
-        dqn_agent.epsilon_min = 0.0005
+        dqn_agent.epsilon_min = 0.0001
         dqn_agent.epsilon = dqn_agent.epsilon_min
 
         # load trained weights
@@ -729,19 +761,23 @@ if __name__ == '__main__':
         #train
         # start = datetime(2019,1, 1)
         # end = datetime(2019, 2, 1)
-        start = datetime(2020, 3, 27)
-        end = datetime(2020, 4, 5)
-        # end = datetime.now() - timedelta(hours = 6)
+
+        # start = datetime(2020, 3, 27)
+        # end = datetime(2020, 4, 6)
+
+        start = datetime(2018, 3, 15)
+        end = datetime(2018, 4, 1)
+
 
     elif mode == 'test':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
 
-        # start = datetime(2020, 3, 27)
-        # end = datetime(2020, 4, 5)
+        # start = datetime(2020, 3, 28)
+        # end = datetime(2020, 4, 7)
 
         start = datetime(2018, 3, 1)
         end = datetime(2018, 4, 1)
 
 
-    run_agent_sim(mode, paths, start, end, 800, symbols)
+    run_agent_sim(mode, paths, start, end, 500, symbols)
