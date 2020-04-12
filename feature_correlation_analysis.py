@@ -7,7 +7,7 @@ end = datetime.now()
 
 last_time_scraped = datetime.now() - timedelta(days = 20)
 
-symbols = ['BTCUSD']#, 'ETHUSD', 'LTCUSD'] #Example: 'BTCUSD'
+symbols = ['BTCUSD'] #, 'ETHUSD', 'LTCUSD'] #Example: 'BTCUSD'
 markets = [sym[3:6] + '-' + sym[0:3] for sym in symbols]
 
 
@@ -22,28 +22,28 @@ df = fetch_historical_data(paths, markets, start, end, my_bittrex)  #gets all da
 
 print("ORIGINAL DATA: ")
 print(df.head())
-df = change_df_granulaty(df, 10)
-add_features(df)
-df = strip_df_open_high_low(df)
-print("DATA TO RUN ON: ")
-print(df.head())
+df = change_df_granulaty(df, 5)
+for param in [30]:
+    add_features(df, renko_block = param)
+    print("DATA TO RUN ON: ")
+    print(df.head())
 
-for symbol in symbols:
-    token = symbol[0:3]
-    df['Price Change'] = df[token + 'Close'].shift(1) - df[token + 'Close']
+    for symbol in symbols:
+        token = symbol[0:3]
+        df['Future Price'] = df[token + 'Close'].shift(1) - df[token + 'Close']
 
-    assert not df.empty
+        assert not df.empty
 
-    features = ['Renko', token + 'MACD', token + 'RSI']
+        features = ['Renko', token + 'MACD', token + 'RSI']
 
-    for feature in features:
-        fig, ax = plt.subplots(1, 1)  # Create the figure
+        for feature in features:
+            fig, ax = plt.subplots(1, 1)  # Create the figure
 
-        fig.suptitle(feature + ' Feature and Future Price Correlation', fontsize=14, fontweight='bold')
-        df.plot(x=feature, y='Price Change', ax=ax, kind = 'scatter')
+            fig.suptitle(feature + ' Feature and Future Price Correlation For' + token, fontsize=14, fontweight='bold')
+            df.plot(x=feature, y='Future Price', ax=ax, kind = 'scatter')
 
-        # bot, top = plt.ylim()
-        # cushion = 200
-        # plt.ylim(bot - cushion, top + cushion)
+            # bot, top = plt.ylim()
+            # cushion = 200
+            # plt.ylim(bot - cushion, top + cushion)
 
 plt.show()

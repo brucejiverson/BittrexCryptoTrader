@@ -24,7 +24,6 @@ from sklearn.preprocessing import StandardScaler
 
 
 """Whats Bruce working on?
--change from "Date" column to "Timestamp"
 -understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 -get all plots to show at the same time
 -breaking code apart into files, better file management, more official commenting
@@ -42,7 +41,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 """DESIRED FEATURES
--incorporate delayed trading (std dev?)
+-incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
 -reevaluate how the agents and enviroment interract, make sure that it can scale for multiple agents
 -reevaluate using datetimes as index in dataframe
 -integrate sentiment with features
@@ -70,18 +69,19 @@ def maybe_make_dir(directory):
         print(f'I made a directory at {directory}')
 
 
-def process_candle_dict(candle_dictionary):
-    # print(candle_dictionary)
-    # Dataframe formatted the same as
+def process_candle_dict(candle_dictionary, market):
+    # Dataframe formatted the same as in other functions
     # V and BV refer to volume and base volume
+    ticker = market[4:7]
     df = pd.DataFrame(candle_dictionary['result'])
+    df['T'] = pd.to_datetime(df['T'], format="%Y-%m-%dT%H:%M:%S")
+    df = df.rename(columns={'T': 'Timestamp', 'O': ticker + 'Open', 'H': ticker +'High', 'L': ticker +'Low', 'C': ticker +'Close', 'V': ticker +'Volume'})
+    df.set_index('Timestamp', drop = True, inplace = True)
     df.drop(columns=["BV"])
-    df = df.rename(columns={'T': "Date", 'O': 'BTCOpen', 'H': 'BTCHigh', 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'})
 
-    df = df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
-    df.reset_index(inplace=True, drop=True)
-    # dates into datetimess
-    df.Date = pd.to_datetime(df.Date, format="%Y-%m-%dT%H:%M:%S")
+    #Reorder the columns
+    df = df[[ticker +'Open', ticker +'High', ticker +'Low', ticker +'Close', ticker +'Volume']]
+    # print(df.head())
     return df
 
 
@@ -100,11 +100,11 @@ def format_df(input_df):
     """This function formats the dataframe according to the assets that are in it. Needss to be updated to handle multiple assets.
     Note that this should only be used before high low open are stripped from the data."""
     # input_df = input_df[['Date', 'BTCClose']]
-    formatted_df = input_df.drop_duplicates(subset='Date', inplace=False)
-    formatted_df = formatted_df[formatted_df['BTCClose'].notnull()]  # Remove non datapoints from the set
-    formatted_df.sort_values(by='Date', inplace=True)   #This was causing a warning about future deprecation/changes to pandas
-    formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
-    formatted_df.reset_index(inplace=True, drop = True)
+    formatted_df = input_df
+    bool_series = input_df['BTCClose'].notnull()
+    formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
+    formatted_df.sort_index(inplace = True)  #This was causing a warning about future deprecation/changes to pandas
+    # formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
 
     return formatted_df
 
@@ -115,27 +115,30 @@ def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj)
 
     print('Fetching historical data...')
 
-    cols = ["Date"]
+    #construct the column names to use in the output df
+    cols = []
     for market in markets:
         for item in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            cols.append(market[3:6] + item)
+            cols.append(market[4:7] + item)
 
     df = pd.DataFrame(columns=cols)
 
-    # Fetch candle data from bittrex
+    # Fetch candle data from bittrex for each market
     if end_date > datetime.now() - timedelta(days=9):
-        for market in markets:
+        for i, market in enumerate(markets):
             print('Fetching ' + market + ' historical data from the exchange.')
             attempts = 0
             while True:
                 print('Fetching candles from Bittrex...')
                 candle_dict = bittrex_obj.get_candles(market, 'oneMin')
 
+
                 if candle_dict['success']:
-                    candle_df = process_candle_dict(candle_dict)
-                    print("Success getting candle data.")
+                    candle_df = process_candle_dict(candle_dict, market)
+                    print("Success getting candle data:")
+                    print(candle_df.head())
                     break
-                else:
+                else: #If there is an error getting the proper data
                     print("Failed to get candle data.")
                     print(candle_dict)
                     time.sleep(2*attempts)
@@ -145,32 +148,37 @@ def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj)
                         print('Exceeded maximum number of attempts.')
                         raise(TypeError)
                     print('Retrying...')
-
-        df = df.append(candle_df)
+            #The below logic is to handle joinging data from multiple currencies
+            if i == 0: test = df.append(candle_df)
+            else: test = df.join(candle_df)
+            print('test:')
+            print(test.head())
+            df = df.append(candle_df)
 
     path = path_dict['updated history']
+    #
+    # if df.empty or df.index.min() > start_date:  # try to fetch from updated
+    #     print('Fetching data from cumulative data repository.')
+    #
+    #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+    #     up_df = pd.read_csv(path, index = 'Timestamp', parse_dates = True, date_parser=dateparse)
+    #
+    #     if up_df.empty:
+    #         print('Cumulative data repository was empty.')
+    #     else:
+    #         print('Success fetching from cumulative data repository.')
+    #         # up_df.set_index('Timestamp', drop = True, inplace = True)
+    #         df = df.append(up_df)
 
-    if df.empty or df.Date.min() > start_date:  # try to fetch from updated
-        print('Fetching data from cumulative data repository.')
-
-        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
-
-        if up_df.empty:
-            print('Cumulative data repository was empty.')
-        else:
-            print('Success fetching from cumulative data repository.')
-            df = df.append(up_df)
-
-    if df.empty or df.Date.min() > start_date:  # Fetch from download file (this is last because its slow)
+    if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
 
         print('Fetching data from the download file.')
         # get the historic data. Columns are Timestamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
 
         def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-        orig_df = pd.read_csv(path_dict['downloaded history'], usecols=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
+        orig_df = pd.read_csv(path_dict['downloaded history'], index_col = 'Timestamp', usecols=['Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
             'Timestamp'], date_parser=dateparse)
-        orig_df.rename(columns={'Timestamp': 'Date', 'O': 'BTCOpen', 'H': 'BTCHigh',
+        orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh',
                                 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
 
         assert not orig_df.empty
@@ -178,14 +186,23 @@ def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj)
         df = df.append(orig_df)
 
     # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
-    assert(df.Date.min() <= start_date)
+    assert(df.index.min() <= start_date)
 
     # if df.Date.max() < end_date:
     #     print('There is a gap between the download data and the data available from Bittrex. Please update download data.')
     #     assert(df.Date.max() >= end_date)
 
-    df = df[df['Date'] >= start_date]
-    df = df[df['Date'] <= end_date]
+    #filter the df for
+    # df = df.index.indexer_between_time(start_date, end_date)
+
+    #Drop undesired currencies
+    for col in df.columns:
+        market = 'USD-' + col[0:3] #should result in 'USD-ETH' or similar
+        #drop column if necessary
+        if not market in markets: df.drop(columns=[col], inplace = True)
+
+    df = df[df.index > start_date]
+
     df = format_df(df)
 
     return df
@@ -212,7 +229,7 @@ def change_df_granulaty(input_df, gran):
 
     print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
 
-    if input_df['Date'].iloc[1] - input_df['Date'].iloc[0] == timedelta(minutes = 1): #verified this works
+    if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
         input_df =  input_df.iloc[::gran, :]
         input_df = format_df(input_df)
         # print(input_df.head())
@@ -248,26 +265,34 @@ def save_historical_data(path_dict, df):
     # must create new df as df is passed by reference
     # # datetimes to strings
     # df = pd.DataFrame({'Date': data[:, 0], 'BTCClose': np.float_(data[:, 1])})   #convert from numpy array to df
-
-    def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-    old_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
-
-
-    df_to_save = df.append(old_df)
-
+    #
+    # print('Loading old df...')
+    # def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+    # old_df = pd.read_csv(path, index_col = 'Timestamp', parse_dates = True, date_parser=dateparse)
+    # # print(old_df.head())
+    # if old_df.empty:
+    #     print('Cumulative data repository was empty.')
+    # else:
+    #     print('Success fetching from cumulative data repository.')
+    #     # old_df.set_index('Timestamp', drop = True, inplace = True)
+    #     # print('Old df')
+    #     # print(old_df.head())
+    #     # print(old_df.loc['Timestamp'])
+    #
+    # df_to_save = df.append(old_df)
+    # print(df_to_save.head())
+    # print(df_to_save.index)
+    df_to_save = df
     df_to_save = format_df(df_to_save)
 
     # df_to_save = filter_error_from_download_data(df_to_save)
-
-    df_to_save['Date'] = df_to_save['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
-
-    df_to_save.to_csv(path, index=False)
+    df_to_save.to_csv(path, index = True, index_label = 'Timestamp', date_format = "%Y-%m-%d %I-%p-%M")
 
     # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
     print('Data written.')
 
 
-def add_features(input_df):
+def add_features(input_df, renko_block = 40):
     """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
 
     print('Constructing features...')
@@ -384,7 +409,7 @@ def add_features(input_df):
     # add_sma_as_column(input_df, int(base*13/5))
     # add_sentiment(input_df)
 
-    add_renko(input_df, 40)
+    add_renko(input_df, renko_block)
 
     input_df['BTCMACD'] = ta.trend.macd_diff(input_df['BTCClose'], fillna  = True)
     input_df['BTCRSI'] = ta.momentum.rsi(input_df['BTCClose'], fillna  = True)
@@ -621,7 +646,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
     plot_sim_trade_history(df, state_log)
 
 
-def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols=['USDBTC']):
+def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols=['BTCUSD']):
     assert(mode == 'run')
 
     #Prepare the agent
@@ -702,7 +727,7 @@ def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols
 
         df = df.append(new_df)
         df = df.drop_duplicates(['Date'])
-        df = df.sort_values(by='Date')
+        df.sort_values(axis = 'index', inplace=True)
         df.reset_index(inplace=True, drop=True)
 
         if first_check:
@@ -737,7 +762,7 @@ if os == 'linux':
 
 elif os == 'windows':
     paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
-    'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols[0] + '.csv',
+    'updated history': 'C:/Python Programs/crypto_trader/historical data/cumulative_data_all_currencies.csv',
     'secret': "/Users/biver/Documents/crypto_data/secrets.json",
     'rewards': 'agent_rewards',
     'models': 'agent_models',
@@ -780,4 +805,4 @@ if __name__ == '__main__':
         end = datetime(2018, 4, 1)
 
 
-    run_agent_sim(mode, paths, start, end, 500, symbols)
+    run_agent_sim(mode, paths, start, end, 500, symbols = symbols)

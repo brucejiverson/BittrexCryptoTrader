@@ -12,33 +12,27 @@ with open(paths['secret']) as secrets_file:
 
 my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
-market = symbols[3:6] + '-' + symbols[0:3]
-
-
-# start = datetime(2012,1, 1)
-# end = datetime.now() - timedelta(hours = 1)
+symbols = ['BTCUSD', 'ETHUSD', 'LTCUSD'] #Example: 'BTCUSD'
+markets = [sym[3:6] + '-' + sym[0:3] for sym in symbols]
 
 start = datetime(2016, 1, 1)
 end = datetime.now()
 
-df = fetch_historical_data(paths, market, start, end, my_bittrex)  # oldest date info
-
-# save_historical_data(paths, df)
-
+df = fetch_historical_data(paths, markets, start, end, my_bittrex)  # oldest date info
 
 print('Historical data has been fetched, updated, and resaved.')
 
-
 assert not df.empty
-fig, ax = plt.subplots(1, 1)  # Create the figure
+for sym in symbols:
+    token = sym[0:3]
+    fig, ax = plt.subplots(1, 1)  # Create the figure
 
-market_perf = ROI(df.BTCClose.iloc[0], df.BTCClose.iloc[-1])
-fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-df.plot(x='Date', y='BTCClose', ax=ax)
+    market_perf = ROI(df[token + 'Close'].iloc[0], df[token + 'Close'].iloc[-1])
+    fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+    df.plot(x='Date', y= token + 'Close', ax=ax)
 
-
-bot, top = plt.ylim()
-cushion = 200
-plt.ylim(bot - cushion, top + cushion)
-fig.autofmt_xdate()
+    bot, top = plt.ylim()
+    cushion = 200
+    plt.ylim(bot - cushion, top + cushion)
+    fig.autofmt_xdate()
 plt.show()
