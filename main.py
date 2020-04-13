@@ -22,27 +22,26 @@ import urllib.request
 from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
-
 """Whats Bruce working on?
+-make the envioments inherit from a single class to ensure similar architecture
+-reevaluate how the agents and enviroment interract, make sure that it can scale for multiple agents
+-trade logging (API will not return all trade history, limited by time).
+-account state logging (should be tied to plotting which currency is held at a given time)
+
 -understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 -get all plots to show at the same time
--breaking code apart into files, better file management, more official commenting
--better data
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -change feature engineering to better represent how feature engineering works in real time
--Start regularly scraping data for future training
+-enable data scraping to handle multiple currencies
 """
 
 """Whats sean working on?
-
--Plot which currency is held at any given time
-
+-Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
 """
 
 
 """DESIRED FEATURES
 -incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
--reevaluate how the agents and enviroment interract, make sure that it can scale for multiple agents
 -reevaluate using datetimes as index in dataframe
 -integrate sentiment with features
 -be clear about episode/epoch terminology
@@ -75,8 +74,8 @@ def process_candle_dict(candle_dictionary, market):
     ticker = market[4:7]
     df = pd.DataFrame(candle_dictionary['result'])
     df['T'] = pd.to_datetime(df['T'], format="%Y-%m-%dT%H:%M:%S")
-    df = df.rename(columns={'T': 'Timestamp', 'O': ticker + 'Open', 'H': ticker +'High', 'L': ticker +'Low', 'C': ticker +'Close', 'V': ticker +'Volume'})
-    df.set_index('Timestamp', drop = True, inplace = True)
+    df = df.rename(columns={'T': 'TimeStamp', 'O': ticker + 'Open', 'H': ticker +'High', 'L': ticker +'Low', 'C': ticker +'Close', 'V': ticker +'Volume'})
+    df.set_index('TimeStamp', drop = True, inplace = True)
     df.drop(columns=["BV"])
 
     #Reorder the columns
@@ -161,23 +160,23 @@ def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj)
     #     print('Fetching data from cumulative data repository.')
     #
     #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-    #     up_df = pd.read_csv(path, index = 'Timestamp', parse_dates = True, date_parser=dateparse)
+    #     up_df = pd.read_csv(path, index = 'TimeStamp', parse_dates = True, date_parser=dateparse)
     #
     #     if up_df.empty:
     #         print('Cumulative data repository was empty.')
     #     else:
     #         print('Success fetching from cumulative data repository.')
-    #         # up_df.set_index('Timestamp', drop = True, inplace = True)
+    #         # up_df.set_index('TimeStamp', drop = True, inplace = True)
     #         df = df.append(up_df)
 
     if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
 
         print('Fetching data from the download file.')
-        # get the historic data. Columns are Timestamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+        # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
 
-        def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-        orig_df = pd.read_csv(path_dict['downloaded history'], index_col = 'Timestamp', usecols=['Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
-            'Timestamp'], date_parser=dateparse)
+        def dateparse(x): return pd.TimeStamp.fromtimestamp(int(x))
+        orig_df = pd.read_csv(path_dict['downloaded history'], index_col = 'TimeStamp', usecols=['Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
+            'TimeStamp'], date_parser=dateparse)
         orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh',
                                 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
 
@@ -268,16 +267,16 @@ def save_historical_data(path_dict, df):
     #
     # print('Loading old df...')
     # def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-    # old_df = pd.read_csv(path, index_col = 'Timestamp', parse_dates = True, date_parser=dateparse)
+    # old_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
     # # print(old_df.head())
     # if old_df.empty:
     #     print('Cumulative data repository was empty.')
     # else:
     #     print('Success fetching from cumulative data repository.')
-    #     # old_df.set_index('Timestamp', drop = True, inplace = True)
+    #     # old_df.set_index('TimeStamp', drop = True, inplace = True)
     #     # print('Old df')
     #     # print(old_df.head())
-    #     # print(old_df.loc['Timestamp'])
+    #     # print(old_df.loc['TimeStamp'])
     #
     # df_to_save = df.append(old_df)
     # print(df_to_save.head())
@@ -286,7 +285,7 @@ def save_historical_data(path_dict, df):
     df_to_save = format_df(df_to_save)
 
     # df_to_save = filter_error_from_download_data(df_to_save)
-    df_to_save.to_csv(path, index = True, index_label = 'Timestamp', date_format = "%Y-%m-%d %I-%p-%M")
+    df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
 
     # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
     print('Data written.')
@@ -744,33 +743,17 @@ def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols
 
 #cryptodatadownload has gaps
 #Place to download: https://www.kaggle.com/jessevent/all-crypto-currencies iSinkInWater, brucejamesiverson@gmail.com, I**********
-os = 'windows' #linux or windows
 symbols = ['BTCUSD'] #Example: 'BTCUSD'
 
 #The below should be updated to be simplified to use parent directory? unsure how that works...
 #https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
 
-if os == 'linux':
-    paths = {'downloaded history': '/home/bruce/AlgoTrader/BittrexTrader/bitstampUSD_1-min_data_2012-01-01_to_2019-03-13.csv',
-    'updated history': '/home/bruce/AlgoTrader/updated_history_' + symbols[0] + '.csv',
-    'secret': "/home/bruce/Documents/crypto_data/secrets.json",
-    'rewards': 'agent_rewards',
-    'models': 'agent_models',
-    'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols[0] + '.csv'}
-
-    # TODO: add a loop here that appends the asset folders
-
-elif os == 'windows':
-    paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
-    'updated history': 'C:/Python Programs/crypto_trader/historical data/cumulative_data_all_currencies.csv',
-    'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-    'rewards': 'agent_rewards',
-    'models': 'agent_models',
-    'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols[0] + '.csv'}
-else:
-    print('Unknown OS passed when defining the paths')  # this should throw and error
-    assert(os in ['windows', 'linux'])
-
+paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
+'updated history': 'C:/Python Programs/crypto_trader/historical data/cumulative_data_all_currencies.csv',
+'secret': "/Users/biver/Documents/crypto_data/secrets.json",
+'rewards': 'agent_rewards',
+'models': 'agent_models',
+'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols[0] + '.csv'}
 
 
 if __name__ == '__main__':

@@ -1,16 +1,18 @@
-from bittrex.bittrex import *
 from main import *
+from environments import *
 import pandas as pd
 from datetime import datetime, timedelta
 import json
 
-bittrex_market = BittrexExchage(paths, 5)
+env = BittrexExchange(paths, money_to_use = 5)
+# env._trade('USD-BTC', 5)
+env.get_all_order_history()
 
-num_trades = 5
-
-is_USD = True
-
-log = pd.DataFrame()
+# num_trades = 5
+#
+# is_USD = True
+#
+# log = pd.DataFrame()
 #
 # for n in list(range(num_trades)):
 #
