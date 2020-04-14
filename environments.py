@@ -17,6 +17,7 @@ class ExchangeEnvironment:
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
 
+
         self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
 
         portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
@@ -38,6 +39,12 @@ class ExchangeEnvironment:
 
         self.last_action = []
 
+
+
+        self.assets_owned = None
+        self.asset_prices = [0]*self.n_asset
+
+        self.USD = None
         # self.rewards_hist_len = 10
         # self.rewards_hist = np.ones(self.rewards_hist_len)
 
@@ -71,9 +78,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         # instance attributes
         self.initial_investment = initial_investment
         self.cur_step = None
-        self.assets_owned = None
-        self.asset_prices = None
-        self.USD = None
         self.mean_spread = .0001 #Fraction of asset value typical for the spread
 
         self.reset()
@@ -252,10 +256,8 @@ class BittrexExchange(ExchangeEnvironment):
 
         # instance attributes
         self.initial_investment = money_to_use
-        self.assets_owned = None #this needs to change
-        self.asset_prices = [0]*self.n_asset
+
         self.asset_volumes = None
-        self.USD = None
 
         # self.state, self.cur_val = self.reset()
 

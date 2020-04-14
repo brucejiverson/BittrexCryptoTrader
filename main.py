@@ -586,7 +586,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon_min = 0.000
+            agent.epsilon_min = 0.000000001
             agent.epsilon = agent.epsilon_min
 
             # load trained weights
