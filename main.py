@@ -23,7 +23,7 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
--make the envioments inherit from a single class to ensure similar architecture
+-mirror the datastructure of the sim env in the real env
 -reevaluate how the agents and enviroment interract, make sure that it can scale for multiple agents
 -trade logging (API will not return all trade history, limited by time).
 -account state logging (should be tied to plotting which currency is held at a given time)
@@ -155,28 +155,29 @@ def fetch_historical_data(path_dict, markets, start_date, end_date, bittrex_obj)
             df = df.append(candle_df)
 
     path = path_dict['updated history']
-    #
-    # if df.empty or df.index.min() > start_date:  # try to fetch from updated
-    #     print('Fetching data from cumulative data repository.')
-    #
-    #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-    #     up_df = pd.read_csv(path, index = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-    #
-    #     if up_df.empty:
-    #         print('Cumulative data repository was empty.')
-    #     else:
-    #         print('Success fetching from cumulative data repository.')
-    #         # up_df.set_index('TimeStamp', drop = True, inplace = True)
-    #         df = df.append(up_df)
+
+    if df.empty or df.index.min() > start_date:  # try to fetch from updated
+        print('Fetching data from cumulative data repository.')
+
+        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+
+        if up_df.empty:
+            print('Cumulative data repository was empty.')
+        else:
+            print('Success fetching from cumulative data repository.')
+            # up_df.set_index('TimeStamp', drop = True, inplace = True)
+            df = df.append(up_df)
 
     if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
 
         print('Fetching data from the download file.')
         # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
 
-        def dateparse(x): return pd.TimeStamp.fromtimestamp(int(x))
-        orig_df = pd.read_csv(path_dict['downloaded history'], index_col = 'TimeStamp', usecols=['Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
-            'TimeStamp'], date_parser=dateparse)
+        def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+        cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+        orig_df = pd.read_csv(path_dict['downloaded history'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+        orig_df.set_index('Timestamp', inplace = True, drop = True)
         orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh',
                                 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
 
@@ -428,7 +429,7 @@ def plot_data(df):
 
     market_perf = ROI(df.BTCClose.iloc[0], df.BTCClose.iloc[-1])
     fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-    df.plot(x='Date', y='BTCClose', ax=ax)
+    df.plot( y='BTCClose', ax=ax)
 
     bot, top = plt.ylim()
     cushion = 200
@@ -445,11 +446,11 @@ def plot_sim_trade_history(df, log, roi=0): #updated based on the "broken file."
 
     market_perf = ROI(df.BTCClose.iloc[0], df.BTCClose.iloc[-1])
     fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-    df.plot(x='Date', y='BTCClose', ax=ax1)
+    df.plot( y='BTCClose', ax=ax1)
 
     for col in df.columns:
-        if not col[3:] in ['Open', 'High', 'Low', 'Close'] and not col in ['Date', 'BTCVolume']:
-            df.plot(x='Date', y=col, ax=ax3)
+        if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            df.plot(y=col, ax=ax3)
 
     # df.plot(x='Date', y='Account Value', ax=ax)
 
@@ -568,27 +569,28 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
     print("DATA TO RUN ON: ")
     print(df.head())
 
-    data_to_fit = df.drop('Date', axis = 1).values
+    data_to_fit = df.values
 
     sim_env = SimulatedCryptoExchange(data_to_fit, initial_investment)
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
-    dqn_agent = DQNAgent(state_size, action_size)
+    agent = DQNAgent(state_size, action_size)#DQNAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)
     if mode == 'test':
         print('Testing...')
         num_episodes = 5
-        # then load the previous scaler
-        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-            my_scaler = pickle.load(f)
+        if agent.name == 'dqn':
+            # then load the previous scaler
+            with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+                my_scaler = pickle.load(f)
 
-        # make sure epsilon is not 1!
-        # no need to run multiple episodes if epsilon = 0, it's deterministic
-        dqn_agent.epsilon_min = 0.0001
-        dqn_agent.epsilon = dqn_agent.epsilon_min
+            # make sure epsilon is not 1!
+            # no need to run multiple episodes if epsilon = 0, it's deterministic
+            agent.epsilon_min = 0.000
+            agent.epsilon = agent.epsilon_min
 
-        # load trained weights
-        dqn_agent.load(f'{models_folder}/linear.npz')
+            # load trained weights
+            agent.load(f'{models_folder}/linear.npz')
 
     time_remaining = timedelta(hours=0)
     market_roi = return_on_investment(df.BTCClose.iloc[-1], df.BTCClose.iloc[0])
@@ -600,9 +602,9 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
         t0 = datetime.now()
 
         if e == num_episodes - 1:
-            val, state_log = play_one_episode(dqn_agent, sim_env, my_scaler, mode, True)
+            val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
         else:
-            val = play_one_episode(dqn_agent, sim_env, my_scaler, mode)
+            val = play_one_episode(agent, sim_env, my_scaler, mode)
 
         roi = return_on_investment(val, initial_investment)  # Transform to ROI
         dt = datetime.now() - t0
@@ -612,7 +614,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
             (dt * (num_episodes - (e + 1)) - time_remaining) / (e + 1)
         if e % 100 == 0 and mode in ['train']: # save the weights when we are done
             # save the DQN
-            dqn_agent.save(f'{models_folder}/linear.npz')
+            agent.save(f'{models_folder}/linear.npz')
             print('DQN saved.')
 
             print('Saving scaler...')
@@ -621,13 +623,13 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
                 pickle.dump(my_scaler, f)
             print('Scaler saved.')
 
-        print(f"episode: {e + 1}/{num_episodes}, end value: {val:.2f}, episode roi: {roi:.2f}, time remaining: {time_remaining}")
+        print(f"episode: {e + 1}/{num_episodes}, end value: {val:.2f}, episode roi: {roi:.2f}%, time remaining: {time_remaining}")
         portfolio_value.append(val)  # append episode end portfolio value
 
     # save the weights when we are done
     if mode in ['train']:
         # save the DQN
-        dqn_agent.save(f'{models_folder}/linear.npz')
+        agent.save(f'{models_folder}/linear.npz')
         print('DQN saved.')
 
         # save the scaler
@@ -635,7 +637,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
             pickle.dump(my_scaler, f)
         print('Scaler saved.')
         # plot losses
-        plt.plot(dqn_agent.model.losses) #this plots the index on the x axis and he loss on the y
+        plt.plot(agent.model.losses) #this plots the index on the x axis and he loss on the y
 
     # save portfolio value for each episode
     print('Saving rewards...')
@@ -781,11 +783,11 @@ if __name__ == '__main__':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
 
-        # start = datetime(2020, 3, 28)
-        # end = datetime(2020, 4, 7)
+        start = datetime.now() - timedelta(days = 10)
+        end = datetime.now()
 
-        start = datetime(2018, 3, 1)
-        end = datetime(2018, 4, 1)
+        # start = datetime(2018, 3, 1)
+        # end = datetime(2018, 4, 1)
 
 
     run_agent_sim(mode, paths, start, end, 500, symbols = symbols)

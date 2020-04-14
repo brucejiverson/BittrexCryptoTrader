@@ -8,7 +8,7 @@ import itertools
 import numpy as np
 import json
 
-class Exchange:
+class ExchangeEnvironment:
     """All other environment classes inherit from this class. This is done to ensure similar architecture
     between different classes (eg simulated vs real exchange), and to make it easy to change that
     architecture by having change be in a single place."""
@@ -19,10 +19,33 @@ class Exchange:
 
         self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
 
+        portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
+        # The possible portions of the portfolio that could be allocated to a single asset
+        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
+        # calculate all possible allocations of wealth across the available assets
+        self.action_list = []
+        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
+        #Only include values that are possible (can't have more than 100% of the portfolio)
+        for i, item in enumerate(permutations_list):
+            if sum(item) <= 1:
+                self.action_list.append(item)
+
+        #This list is for indexing each of the actions
+        self.action_space = np.arange(len(self.action_list))
+
+        # calculate size of state (amount of each asset held, value of each asset, volumes, USD/cash, indicators for each asset)
+        self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset
+
+        self.last_action = []
+
+        # self.rewards_hist_len = 10
+        # self.rewards_hist = np.ones(self.rewards_hist_len)
+
+
     def _add_features():
         pass
 
-class SimulatedCryptoExchange(Exchange):
+class SimulatedCryptoExchange(ExchangeEnvironment):
     """
     A multi-asset trading environment.
     For now this has been adopted for only one asset.
@@ -35,7 +58,7 @@ class SimulatedCryptoExchange(Exchange):
     """
 
     def __init__(self, data, initial_investment=100):
-        Exchange.__init__(self)
+        ExchangeEnvironment.__init__(self)
 
         # data
         self.asset_data = data
@@ -53,33 +76,6 @@ class SimulatedCryptoExchange(Exchange):
         self.USD = None
         self.mean_spread = .0001 #Fraction of asset value typical for the spread
 
-
-        # Create the attributes to store indicators. This has been implemented to incorporate more information about the past to mitigate the MDP assumption.
-
-        self.min_trade_spacing = 1  # The number of datapoints that must occur between trades
-        self.period_since_trade = self.min_trade_spacing
-
-        portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
-        # The possible portions of the portfolio that could be allocated to a single asset
-        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
-        # calculate all possible allocations of wealth across the available assets
-        self.action_list = []
-        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
-        #Only include values that are possible (can't have more than 100% of the portfolio)
-        for i, item in enumerate(permutations_list):
-            if sum(item) <= 1:
-                self.action_list.append(item)
-
-        #This list is for indexing each of the actions
-        self.action_space = np.arange(len(self.action_list))
-
-        # calculate size of state (amount of each asset held, value of each asset, cash in hand, volumes, indicators)
-        self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset   #State is the stationary data and the indicators for each asset (currently ignoring volume)
-
-        # self.rewards_hist_len = 10
-        # self.rewards_hist = np.ones(self.rewards_hist_len)
-
-        self.last_action = []
         self.reset()
 
     def reset(self):
@@ -199,7 +195,7 @@ class SimulatedCryptoExchange(Exchange):
         cur_val = self._get_val()
 
 
-        if action_vec != self.last_action and self.period_since_trade >= self.min_trade_spacing:  # if attmepting to change state
+        if action_vec != self.last_action:  # if attmepting to change state
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
 
@@ -237,16 +233,14 @@ class SimulatedCryptoExchange(Exchange):
             self.last_action = action_vec
             self.period_since_trade = 0
 
-        self.period_since_trade += 1    #Changed this while I was high, used to be in an else statement
-
-class BittrexExchange(Exchange):
-    """
-    In progress. work needed.
-
-    """
+class BittrexExchange(ExchangeEnvironment):
+    """This class provides an interface with the Bittrex exchange for any and all operations. It inherites from the 'ExchangeEnvironment
+    class, which ensures similar architecture between different environments. Methods for this class include executing trades,
+    logging account value over time, displaying account value over time, retrieving information on prices, balances, and orders from
+    Bittrex, and uses a similar 'act' method to interface with agents."""
 
     def __init__(self, path_dict, money_to_use=10):
-        Exchange.__init__(self)
+        ExchangeEnvironment.__init__(self)
         #get my keys
         with open("/Users/biver/Documents/crypto_data/secrets.json") as secrets_file:
             keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
@@ -255,10 +249,6 @@ class BittrexExchange(Exchange):
         #Need both versions of the interface as they each provide certain useful functions
         self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
         self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
-        # data
-        self.n_indicators = 0
-
-        # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
 
         # instance attributes
         self.initial_investment = money_to_use
@@ -266,25 +256,6 @@ class BittrexExchange(Exchange):
         self.asset_prices = [0]*self.n_asset
         self.asset_volumes = None
         self.USD = None
-
-        portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset
-        # The possible portions of the portfolio that could be allocated to a single asset
-        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
-        # calculate all possible allocations of wealth across the available assets
-        self.action_list = []
-        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
-        #Only include values that are possible (can't have more than 100% of the portfolio)
-        for i, item in enumerate(permutations_list):
-            if sum(item) <= 1:
-                self.action_list.append(item)
-
-        #This list is for indexing each of the actions
-        self.action_space = np.arange(len(self.action_list))
-
-        # calculate size of state (amount of each asset held, cash in hand, value of each asset, volumes, indicators)
-        self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset   #State is the stationary data and the indicators for each asset (currently ignoring volume)
-
-        self.last_action = []
 
         # self.state, self.cur_val = self.reset()
 

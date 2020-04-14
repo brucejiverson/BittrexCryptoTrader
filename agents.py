@@ -80,8 +80,9 @@ class DQNAgent(object):
     such that they will maximize future rewards
     """
 
-    def __init__(self, state_size, action_size):    #same
+    def __init__(self, state_size, action_size):
 
+        self.name = 'dqn'
         # These two correspond to number of inputs and outputs of the neural network respectively
         self.state_size = state_size
         self.action_size = action_size
@@ -102,7 +103,7 @@ class DQNAgent(object):
 
         # Take argmax over model predictions to get action with max. Q value.
         # Output of model is batch sized by num of outputs to index by 0
-        return np.argmax(act_values[0])  # returns action (same)
+        return np.argmax(act_values[0])  # returns action
 
     def train(self, state, action, reward, next_state, done):
         # This func. does the learning
@@ -126,6 +127,41 @@ class DQNAgent(object):
 
     def save(self, name):
         self.model.save_weights(name)
+
+
+class SimpleAgent():
+    """ Simple agent that trades solely based on the RSI feature
+    """
+
+    def __init__(self, state_size, action_size):    #same
+
+        self.name = 'rsi'
+        # These two correspond to number of inputs and outputs of the neural network respectively
+        self.state_size = state_size
+        self.action_size = action_size
+
+
+    def act(self, state):
+        # This is the policy
+        #Currently assumes only bitcoin is in use, and that RSI is the last feature in the state
+        # print(state)
+        rsi_val = state[0][-1]
+        macd = state[0][-2]
+        renko = state[0][-3]
+        if rsi_val < 1 and renko > -7: #buy
+            return 1
+        else: #sell
+            return 0
+
+
+
+        if np.random.rand() <= self.epsilon:
+            return np.random.choice(self.action_size)
+        act_values = self.model.predict(state)  # Greedy case
+
+        # Take argmax over model predictions to get action with max. Q value.
+        # Output of model is batch sized by num of outputs to index by 0
+        return np.argmax(act_values[0])  # returns action (same)
 
 
 class BenchMarker:
