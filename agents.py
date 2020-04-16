@@ -23,7 +23,7 @@ class LinearModel:
         assert(len(X.shape) == 2)
         return X.dot(self.W) + self.b
 
-    def sgd(self, X, Y, learning_rate=0.004, momentum=0.9):
+    def sgd(self, X, Y, learning_rate=0.01, momentum=0.5):
         """One step of gradient descent.
         learning rate was originally 0.01
         u = momentum term

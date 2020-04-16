@@ -22,6 +22,7 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
+-why is the reinforcement learning agent giving inconsistent test results?
 -make _add_features also update the self.n_features
 -fix an error in renko
 -fetching data from the download file appears not to be working
@@ -204,6 +205,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
     markets = [sym[3:6] + '-' + sym[0:3] for sym in symbols]
 
     sim_env = SimulatedCryptoExchange(path_dict, start_date, end_date, initial_investment)
+    sim_env.save_data(path_dict)
     # print(sim_env.df.head())
 
     state_size = sim_env.state_dim
@@ -248,18 +250,10 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
         time_remaining -= dt
         time_remaining = time_remaining + \
             (dt * (num_episodes - (e + 1)) - time_remaining) / (e + 1)
-        if e % 100 == 0 and mode in ['train']: # save the weights when we are done
-            # save the DQN
-            agent.save(f'{models_folder}/linear.npz')
-            print('DQN saved.')
 
-            print('Saving scaler...')
-            # save the scaler
-            with open(f'{models_folder}/scaler.pkl', 'wb') as f:
-                pickle.dump(my_scaler, f)
-            print('Scaler saved.')
-
-        print(f"episode: {e + 1}/{num_episodes}, end value: {val:.2f}, episode roi: {roi:.2f}%, time remaining: {time_remaining}")
+        print(f"episode: {e + 1}/{num_episodes}, ", end = ' ')
+        print(f"end value: {val:.2f}, episode roi: {roi:.2f}%, ", end = ' ')
+        print(f"time remaining: {time_remaining + timedelta(seconds = 2)}")
         portfolio_value.append(val)  # append episode end portfolio value
 
     # save the weights when we are done
@@ -422,4 +416,4 @@ if __name__ == '__main__':
         # end = datetime(2018, 4, 1)
 
 
-    run_agent_sim(mode, paths, start, end, 1000, symbols = symbols)
+    run_agent_sim(mode, paths, start, end, 400, symbols = symbols)

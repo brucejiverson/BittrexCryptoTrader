@@ -55,7 +55,7 @@ class ExchangeEnvironment:
         #BELOW IS THE OLD WAY THAT INCLUDES THE CURRENT ASSETS HELD
         # calculate size of state (amount of each asset held, value of each asset, volumes, USD/cash, indicators for each asset)
         # self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset
-        self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators #price and volume, and then the indicators
+        self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators + self.n_asset #price and volume, and then the indicators, then last state
         self.last_action = []
 
         self.assets_owned = None
@@ -343,20 +343,26 @@ class ExchangeEnvironment:
         self._add_features()
 
         df_cols = self.df.columns
-        stripped_df = self.df
+        transformed_df = self.df
         # Strip out open high low close
         for market in self.markets:
             token = market[4:7]
             for col in df_cols:
                 if col in [token + 'Open', token + 'High', token + 'Low']:
-                    stripped_df.drop(columns=[col], inplace = True)
+                    transformed_df.drop(columns=[col], inplace = True)
 
+        #Make the data stationary
+        #log(0) = -inf. Some indicators have
 
         print("DATA TO RUN ON: ")
-        print(stripped_df.head())
+        print(transformed_df.head())
+        self.transformed_df = transformed_df
+        self.asset_data = transformed_df.values
 
-        self.asset_data = stripped_df.values
 
+
+    def augmented_dicky_fuller(self):
+        pass
 
     def save_data(self, path_dict):
         # This function writes the information in the original format to the csv file

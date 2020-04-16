@@ -16,3 +16,4 @@ end = datetime.now()
 
 sim_env = SimulatedCryptoExchange(paths, start, end)
 sim_env.plot_market_data()
+sim_env.plot_stationary_data()
