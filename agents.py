@@ -23,7 +23,7 @@ class LinearModel:
         assert(len(X.shape) == 2)
         return X.dot(self.W) + self.b
 
-    def sgd(self, X, Y, learning_rate=0.005, momentum=0.9):
+    def sgd(self, X, Y, learning_rate=0.004, momentum=0.9):
         """One step of gradient descent.
         learning rate was originally 0.01
         u = momentum term
@@ -146,7 +146,7 @@ class SimpleAgent():
         #Currently assumes only bitcoin is in use, and that RSI is the last feature in the state
         # print(state)
         rsi_val = state[0][-1]
-        macd = state[0][-2]
+        # macd = state[0][-2]
         renko = state[0][-3]
         if rsi_val < 1 and renko > -7: #buy
             return 1

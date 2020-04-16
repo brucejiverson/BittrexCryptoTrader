@@ -7,6 +7,15 @@ from datetime import datetime, timedelta
 import itertools
 import numpy as np
 import json
+import ta
+import matplotlib.pyplot as plt
+
+
+def ROI(initial, final):
+    # Returns the percentage increase/decrease
+    return round(final / initial - 1, 2)*100
+
+
 
 class ExchangeEnvironment:
     """All other environment classes inherit from this class. This is done to ensure similar architecture
@@ -14,11 +23,20 @@ class ExchangeEnvironment:
     architecture by having change be in a single place."""
 
     def __init__(self):
+
+        #get my keys
+        with open("/Users/biver/Documents/crypto_data/secrets.json") as secrets_file:
+            keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
+            secrets_file.close()
+
+        #Need both versions of the interface as they each provide certain useful functions
+        self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
+        self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
+
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
 
-
-        self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
+        self.n_indicators = 2 #This HAS to match the number of features that have been created in the add features thing
 
         portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
         # The possible portions of the portfolio that could be allocated to a single asset
@@ -34,23 +52,402 @@ class ExchangeEnvironment:
         #This list is for indexing each of the actions
         self.action_space = np.arange(len(self.action_list))
 
+        #BELOW IS THE OLD WAY THAT INCLUDES THE CURRENT ASSETS HELD
         # calculate size of state (amount of each asset held, value of each asset, volumes, USD/cash, indicators for each asset)
-        self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset
-
+        # self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset
+        self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators #price and volume, and then the indicators
         self.last_action = []
-
-
 
         self.assets_owned = None
         self.asset_prices = [0]*self.n_asset
 
         self.USD = None
+        self.df = None
+
         # self.rewards_hist_len = 10
         # self.rewards_hist = np.ones(self.rewards_hist_len)
 
 
-    def _add_features():
-        pass
+    def _process_candle_dict(self, candle_dictionary, market):
+        # Dataframe formatted the same as in other functions
+        # V and BV refer to volume and base volume
+        ticker = market[4:7]
+        df = pd.DataFrame(candle_dictionary['result'])
+        df['T'] = pd.to_datetime(df['T'], format="%Y-%m-%dT%H:%M:%S")
+        df = df.rename(columns={'T': 'TimeStamp', 'O': ticker + 'Open', 'H': ticker +'High', 'L': ticker +'Low', 'C': ticker +'Close', 'V': ticker +'Volume'})
+        df.set_index('TimeStamp', drop = True, inplace = True)
+        df.drop(columns=["BV"])
+
+        #Reorder the columns
+        df = df[[ticker +'Open', ticker +'High', ticker +'Low', ticker +'Close', ticker +'Volume']]
+        # print(df.head())
+        return df
+
+
+    def fetch_data(self, path_dict, start_date, end_date):
+        """This function pulls data from the exchange, the cumulative repository, and the data download in that order
+        depending on the input date range."""
+
+        print('Fetching historical data...')
+
+        #construct the column names to use in the output df
+        cols = []
+        for market in self.markets:
+            for item in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                cols.append(market[4:7] + item)
+
+        df = pd.DataFrame(columns=cols)
+
+        # Fetch candle data from bittrex for each market
+        if end_date > datetime.now() - timedelta(days=9):
+            for i, market in enumerate(self.markets):
+                print('Fetching ' + market + ' historical data from the exchange.')
+                attempts = 0
+                while True:
+                    print('Fetching candles from Bittrex...', end = " ")
+                    candle_dict = self.bittrex_obj_2.get_candles(market, 'oneMin')
+
+                    if candle_dict['success']:
+                        candle_df = self._process_candle_dict(candle_dict, market)
+                        print("Success.")
+                        # print(candle_df.head())
+                        break
+                    else: #If there is an error getting the proper data
+                        print("Failed to get candle data. Candle dict: ", end = ' ')
+                        print(candle_dict)
+                        time.sleep(2*attempts)
+                        attempts += 1
+
+                        if attempts == 5:
+                            print('Exceeded maximum number of attempts.')
+                            raise(TypeError)
+                            print('Retrying...')
+                            #The below logic is to handle joinging data from multiple currencies
+                            if i == 0: test = df.append(candle_df)
+                            else: test = df.join(candle_df)
+                            # print('test:')
+                            # print(test.head())
+                            df = df.append(candle_df)
+
+        path = path_dict['updated history']
+
+        if df.empty or df.index.min() > start_date:  # try to fetch from updated
+            print('Fetching data from cumulative data repository.')
+
+        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+
+        if up_df.empty:
+            print('Cumulative data repository was empty.')
+        else:
+            print('Success fetching from cumulative data repository.')
+            # up_df.set_index('TimeStamp', drop = True, inplace = True)
+            df = df.append(up_df)
+
+        if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
+
+            print('Fetching data from the download file.')
+            # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+
+            def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+            cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+            orig_df = pd.read_csv(path_dict['downloaded history'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+            orig_df.set_index('Timestamp', inplace = True, drop = True)
+            orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh',
+            'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
+
+            assert not orig_df.empty
+
+            df = df.append(orig_df)
+
+        # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
+        assert(df.index.min() <= start_date)
+
+        #This was a different way that was unsuccessful. leaving for reference
+        # df = df.index.indexer_between_time(start_date, end_date)
+
+        #Drop undesired currencies
+        for col in df.columns:
+            market = 'USD-' + col[0:3] #should result in 'USD-ETH' or similar
+            #drop column if necessary
+            if not market in self.markets: df.drop(columns=[col], inplace = True)
+
+        df = df[df.index > start_date]
+        df = df[df.index < end_date]
+
+        df = self._format_df(df)
+
+        self.df = df
+
+
+    def _format_df(self, df):
+        """This function formats the dataframe according to the assets that are in it. Needss to be updated to handle multiple assets.
+        Note that this should only be used before high low open are stripped from the data."""
+        # input_df = input_df[['Date', 'BTCClose']]
+        formatted_df = df
+        bool_series = df['BTCClose'].notnull()
+        formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
+        formatted_df.sort_index(inplace = True)  #This was causing a warning about future deprecation/changes to pandas
+        # formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
+
+        return formatted_df
+
+
+    def _change_df_granulaty(self, gran):
+        """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes).
+        This could possibly be imporved in the future with the ".resample()" method."""
+
+        print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
+
+        # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
+        self.df =  self.df.iloc[::gran, :]
+        self.df = self._format_df(self.df)
+        # print(input_df.head())
+        # else:
+        #     print('Granularity of df input to change_df_granularity was not 1 minute.')
+        #     raise(ValueError)
+        #     return input_df
+
+    def _add_features(self, renko_block = 40):
+        """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
+
+        print('Constructing features...')
+
+        def add_sma_as_column(mydata, p):
+            # p is a number
+            price = mydata['BTCClose'].values  # returns an np price, faster
+
+            sma = np.empty_like(price)
+            for i, item in enumerate(np.nditer(price)):
+                if i == 0:
+                    sma[i] = item
+                elif i < p:
+                    sma[i] = price[0:i].mean()
+                else:
+                    sma[i] = price[(i - p):i].mean()
+
+            # subtract
+            indicator = np.empty_like(sma)
+            for i, item in enumerate(np.nditer(price)):
+                indicator[i] = sma[i] - price[i]
+
+            mydata['SMA_' + str(p)] = indicator  # modifies the input df
+
+
+        def add_renko(blocksize):
+            #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
+            # p is a number
+            prices = self.df['BTCClose'].values  # returns an np price, faster
+
+            renko = np.empty_like(prices)
+
+            indicator_val = 0
+            #Loop to calculate the renko value at each data point
+            for i, price in enumerate(np.nditer(prices)):
+                if i == 0:
+                    upper_thresh = price + blocksize
+                    lower_thresh = price - blocksize
+                elif price <= lower_thresh: #create a down block
+
+                    indicator_val -= blocksize #continuing a downtrend
+                    lower_thresh -= blocksize
+                    upper_thresh = lower_thresh + 3*blocksize
+
+                elif price >= upper_thresh: #create an up block
+
+                    indicator_val += blocksize #continuing an uptrend
+                    upper_thresh += blocksize
+                    lower_thresh = upper_thresh - 3*blocksize
+
+                    renko[i] = indicator_val
+
+                period = 5
+                indicator = np.empty_like(prices)
+
+            # #Loop to interpret the renko to be more useful
+            # for i, item in enumerate(renko):
+            #     if i == 0:
+            #         indicator[i] = item
+            #     elif i < period:
+            #         indicator[i] = renko[0:i].mean()
+            #     else:
+            #         indicator[i] = renko[(i - period):i].mean() - renko[i-period]
+
+            self.df['Renko'] = renko
+
+
+        def add_sentiment(mydata):
+            """This function pulls sentiment data from the crypto fear and greed index. That data is updated daily.
+            This is the link to the website: https://alternative.me/crypto/fear-and-greed-index/#fng-history
+            The 'limit' argument is the number of data points to fetch (one for each day).
+            The given value is on a scale of 0 - 100, with 0 being extreme fear and 100 being extreme greed."""
+
+
+            #Get the oldest date and figure out how long ago it was
+            days = (datetime.now() - mydata.Date.min()).days + 1 #validated this is correct
+            url = "https://api.alternative.me/fng/?limit="+ str(days) +"&date_format=us"
+
+            data = requests.get(url).json()["data"] #returns a list of dictionaries
+
+            sentiment_df = pd.DataFrame(data)
+
+            #Drop unnecessaary columns
+            sentiment_df.drop(columns = ["time_until_update", "value_classification"], inplace = True)
+            #Rename the columns
+            sentiment_df.rename(columns={'timestamp': 'Date', 'value': 'Value'}, inplace = True)
+            #Format the dates
+            sentiment_df['Date'] = pd.to_datetime(sentiment_df["Date"], format = "%m-%d-%Y")
+            #Convert value to int, and center the sentiment value at 0
+            sentiment_df["Value"] = sentiment_df['Value'].apply(int)
+            sentiment_df['Value'] = sentiment_df['Value'] - 50
+
+            #This should really be done with resample but I had a tough time getting it to work that way
+
+            sentiment = np.empty_like(mydata.BTCClose)
+
+            for i, row in mydata.iterrows():
+                #Checked that both dfs have pandas timestamp date datatypes
+                try:
+                    sentiment[i] = sentiment_df[sentiment_df.Date == row.Date.floor(freq = 'D')].Value
+                except ValueError:
+                    print('Index: ' + str(i))
+                    print(sentiment)
+
+                    # print("SENTIMENT VECTOR: : ")
+                    # print(sentiment)
+                    mydata['Sentiment'] = sentiment
+
+        # base = 50
+        # add_sma_as_column(input_df, base)
+        # add_sma_as_column(input_df, int(base*8/5))
+        # add_sma_as_column(input_df, int(base*13/5))
+        # add_sentiment(input_df)
+
+        # add_renko(renko_block)
+
+        self.df['BTCMACD'] = ta.trend.macd_diff(self.df['BTCClose'], fillna  = True)
+        self.df['BTCRSI'] = ta.momentum.rsi(self.df['BTCClose'], fillna  = True)
+        # self.df['BTCRSI'] = self.df['BTCRSI'] - 50 #center at 0
+        # input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
+
+        self.df = self._format_df(self.df)
+
+
+    def prepare_data(self):
+        """This method takes the raw candle data and constructs features, changes granularity, etc."""
+
+        print("ORIGINAL DATA: ")
+        print(self.df.head())
+        df = self._change_df_granulaty(10)
+
+        self._add_features()
+
+        df_cols = self.df.columns
+        stripped_df = self.df
+        # Strip out open high low close
+        for market in self.markets:
+            token = market[4:7]
+            for col in df_cols:
+                if col in [token + 'Open', token + 'High', token + 'Low']:
+                    stripped_df.drop(columns=[col], inplace = True)
+
+
+        print("DATA TO RUN ON: ")
+        print(stripped_df.head())
+
+        self.asset_data = stripped_df.values
+
+
+    def save_data(self, path_dict):
+        # This function writes the information in the original format to the csv file
+        # including new datapoints that have been fetched
+
+        print('Writing data to CSV.')
+
+        path = path_dict['updated history']
+        # must create new df as df is passed by reference
+        # # datetimes to strings
+        # df = pd.DataFrame({'Date': data[:, 0], 'BTCClose': np.float_(data[:, 1])})   #convert from numpy array to df
+        #
+        # print('Loading old df...')
+        # def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        # old_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+        # # print(old_df.head())
+        # if old_df.empty:
+        #     print('Cumulative data repository was empty.')
+        # else:
+        #     print('Success fetching from cumulative data repository.')
+        #     # old_df.set_index('TimeStamp', drop = True, inplace = True)
+        #     # print('Old df')
+        #     # print(old_df.head())
+        #     # print(old_df.loc['TimeStamp'])
+        #
+        # df_to_save = df.append(old_df)
+        # print(df_to_save.head())
+        # print(df_to_save.index)
+        df_to_save = self.df
+        df_to_save = self._format_df(df_to_save)
+
+        # df_to_save = filter_error_from_download_data(df_to_save)
+        df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
+
+        # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
+        print('Data written.')
+
+
+    def plot_market_data(self):
+
+
+        # I had a ton of trouble getting the plots to look right with the dates.
+        # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
+        assert not self.df.empty
+        fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
+
+        market_perf = ROI(self.df.BTCClose.iloc[0], self.df.BTCClose.iloc[-1])
+        fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+        self.df.plot( y='BTCClose', ax=ax1)
+
+
+        for col in self.df.columns:
+            if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                self.df.plot(y=col, ax=ax2)
+
+        bot, top = plt.ylim()
+        cushion = 200
+        plt.ylim(bot - cushion, top + cushion)
+        fig.autofmt_xdate()
+        plt.show()
+
+        """    assert not df.empty
+            fig, (ax1, ax2, ax3) = plt.subplots(3, 1)  # Create the figure
+
+            market_perf = ROI(df.BTCClose.iloc[0], df.BTCClose.iloc[-1])
+            fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+            df.plot( y='BTCClose', ax=ax1)
+
+            for col in df.columns:
+                if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                    df.plot(y=col, ax=ax3)
+
+            # df.plot(x='Date', y='Account Value', ax=ax)
+
+            # log['Date'] = df.Date
+            # my_roi = ROI(log.Value.iloc[0], log.Value.iloc[-1])
+            #
+            # log.plot(x='Date', y='Value', ax=ax2)
+
+            my_roi = ROI(log.Value.iloc[0], log.Value.iloc[-1])
+            sharpe = my_roi/log.Value.std()
+            print(f'Sharpe Ratio: {sharpe}') #one or better is good
+            log.plot(y='Value', ax=ax2)
+
+
+            bot, top = plt.ylim()
+            cushion = 200
+            plt.ylim(bot - cushion, top + cushion)
+            fig.autofmt_xdate()
+            plt.show()"""
+
 
 class SimulatedCryptoExchange(ExchangeEnvironment):
     """
@@ -64,16 +461,16 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
       - associated indicators for each asset
     """
 
-    def __init__(self, data, initial_investment=100):
+    def __init__(self, path_dict, start, end, initial_investment=100):
         ExchangeEnvironment.__init__(self)
 
         # data
-        self.asset_data = data
+        self.asset_data = None
 
+        self.fetch_data(path_dict, start, end)
+        self.prepare_data()
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
-        self.n_step, self.n_asset = self.asset_data.shape
-        # for now this works but will need to be updated when multiple assets are added
-        self.n_asset -= self.n_indicators + 1
+        self.n_step, n_features = self.asset_data.shape
 
         # instance attributes
         self.initial_investment = initial_investment
@@ -128,7 +525,15 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         cur_val = self._get_val()
         info = {'cur_val': cur_val}
 
-        reward = (cur_val - prev_val) #this used to be more complicated
+
+        def log_ROI(initial, final):
+            """ Returns the log rate of return, which accounts for how percent changes "stack" over time
+            For example, a 10% increase followed by a 10% decrease is truly a 1% decrease over time (100 -> 110 -> 99)
+            Arithmetic ROI would show an overall trend of 0%, but log ROI properly computes this to be -1%"""
+            return round(np.log(final/initial), 4) *100
+
+
+        reward = log_ROI(prev_val, cur_val)#(cur_val - prev_val) #this used to be more complicated
 
         # done if we have run out of data
         done = self.cur_step == self.n_step - 1
@@ -138,15 +543,19 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         return self._get_state(), self._get_val(), reward, done, info
 
     def _get_state(self):
-        # Returns the state (for now state, and observation are the same.
-        # Note that the state could be a transformation of the observation, or
-        # multiple past observations stacked.)
-        #state is (amount of each asset held, value of each asset, cash in hand, volumes, indicators)
+        """This method returns the state, which is an observation that has been transformed to be stationary.
+        Note that the state could later be expanded to be a stack of the current state and previous states
+        The structure of the state WAS PREVIOUSLY [amount of each asset held, value of each asset, cash in hand, volumes, indicators]
+        The structure of the state IS NOW [value of each asset, volumes, indicators]
+        For reference if reconstructing the state, the data is ordered in self.asset_data as [asset prices, asset volumes, asset indicators]"""
 
-        state = np.empty(self.state_dim)  #assets_owned, USD, volume, indicators
-        state[0:self.n_asset] = self.last_action   #This is set in trade
-        state[self.n_asset] = self.USD     #This is set in trade
-        # Asset data is amount btc price, usd, volume, indicators
+        # print(self.state_dim)
+        #assets_owned, USD, volume, indicators
+        state = np.empty(self.state_dim)
+
+        #These were previosly incorporated in the state.
+        # state[0:self.n_asset] = self.last_action   #self.last_action is set in in the 'trade' method
+        # state[self.n_asset] = self.USD     #self.USD is set in in the 'trade' method
 
         #Instituted a try catch here to help with debugging and potentially as a solution to handling invalid/inf values in log
         try:
@@ -158,25 +567,33 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                 slice = self.asset_data[self.cur_step]
                 last_slice = self.asset_data[self.cur_step - 1]
 
-                stationary_slice = np.empty(len(slice))
+                # stationary_slice = np.empty(len(slice))
+                # stationary_slice = slice - last_slice #simple differencing
+                def transform(x): return np.sign(x)*(np.absolute(x)**.5)
 
-                #Comment out one of the two below, the difference is statinary data. NEEDS AN UPGRADE FOR MULTIPLE ASSETS
-                # stationary_slice[0:2] = slice[0:2]
-                stationary_slice[0:2] = np.log(slice[0:2]) - np.log(last_slice[0:2]) #this is price and volume
+                stationary_slice =  transform(slice) - transform(last_slice)
+                #below is full way, currently throwing errors
+                # stationary_slice = np.nan_to_num(np.log(slice) - np.log(last_slice)) #this is price and volume
 
-                stationary_slice[2:6] = slice[2:6] #these are indicators.
+                #BELOW IS THE OLD WAY OF DOING IT
+                # stationary_slice = np.empty(len(slice) - self.n_asset - 1)
+                #
+                # stationary_slice[0:2] = np.log(slice[0:2]) - np.log(last_slice[0:2]) #this is price and volume
+                #
+                # stationary_slice[2:6] = slice[2:6] #these are indicators.
                 # print(stationary_slice)
-                # print(state)
 
         except ValueError:  #Print shit out to help with debugging then throw error
-            # print(slice)
-            # print(stationary_slice)
             print("Error in simulated market class, _get_state method.")
+            print('State: ', end = ' ')
             print(state)
+            print('Slice: ', end = ' ')
+            print(slice)
+            # print(stationary_slice)
             raise(ValueError)
 
-        state[self.n_asset+1:self.state_dim] =  stationary_slice   #Taken from data
-        # print(state)
+        # state[self.n_asset+1:self.state_dim] =  stationary_slice   #Taken from data OLD WAY
+        state = stationary_slice
 
         return state
 
@@ -237,6 +654,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
             self.last_action = action_vec
             self.period_since_trade = 0
 
+
 class BittrexExchange(ExchangeEnvironment):
     """This class provides an interface with the Bittrex exchange for any and all operations. It inherites from the 'ExchangeEnvironment
     class, which ensures similar architecture between different environments. Methods for this class include executing trades,
@@ -245,14 +663,6 @@ class BittrexExchange(ExchangeEnvironment):
 
     def __init__(self, path_dict, money_to_use=10):
         ExchangeEnvironment.__init__(self)
-        #get my keys
-        with open("/Users/biver/Documents/crypto_data/secrets.json") as secrets_file:
-            keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
-            secrets_file.close()
-
-        #Need both versions of the interface as they each provide certain useful functions
-        self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
-        self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
         # instance attributes
         self.initial_investment = money_to_use
@@ -396,84 +806,6 @@ class BittrexExchange(ExchangeEnvironment):
             print('Assets owned: ' + str(self.assets_owned))
             print('Asset prices: ' + str(self.asset_prices))
             return 0
-
-
-    def _fetch_candle_data(self, market, start_date, end_date):
-        # this function is useful as code is ran for the same period in backtesting several times consecutively,
-        # and fetching from original CSV takes longer as it is a much larger file
-
-        print('Fetching historical data...')
-
-        # get the historic data
-        path = self.path_dict['updated history']
-
-        df = pd.DataFrame(columns=['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume'])
-
-        # Fetch candle data from bittrex
-        if end_date > datetime.now() - timedelta(days=10):
-
-            attempts = 0
-            while True:
-                print('Fetching candles from Bittrex...')
-                candle_dict = bittrex_obj.get_candles(
-                    market, 'oneMin')
-                print(market)
-
-                if candle_dict['success']:
-                    candle_df = process_candle_dict(candle_dict)
-                    print("Success getting candle data.")
-                    break
-                else:
-                    print("Failed to get candle data.")
-                    time.sleep(2*attempts)
-                    attempts +=1
-
-                    if attempts == 5:
-                        raise(TypeError)
-                    print('Retrying...')
-
-            df = df.append(candle_df)
-
-
-        if df.empty or df.Date.min() > start_date:  # try to fetch from updated
-            print('Fetching data from cumulative data repository.')
-
-            def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-            up_df = pd.read_csv(path, parse_dates=['Date'], date_parser=dateparse)
-
-            if up_df.empty:
-                print('Cumulative data repository was empty.')
-            else:
-                print('Success fetching from cumulative data repository.')
-                df = df.append(up_df)
-
-        if df.empty or df.Date.min() > start_date:  # Fetch from download file (this is last because its slow)
-
-            print('Fetching data from the download file.')
-            # get the historic data. Columns are Timestamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-
-            def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-            orig_df = pd.read_csv(self.path_dict['downloaded history'], usecols=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)'], parse_dates=[
-                'Timestamp'], date_parser=dateparse)
-            orig_df.rename(columns={'Timestamp': 'Date', 'O': 'BTCOpen', 'H': 'BTCHigh',
-                                    'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
-
-            assert not orig_df.empty
-
-            df = df.append(orig_df)
-
-        # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
-        assert(df.Date.min() <= start_date)
-
-        # if df.Date.max() < end_date:
-        #     print('There is a gap between the download data and the data available from Bittrex. Please update download data.')
-        #     assert(df.Date.max() >= end_date)
-
-        df = df[df['Date'] >= start_date]
-        df = df[df['Date'] <= end_date]
-        df = format_df(df)
-
-        return df
 
 
     def cancel_all_orders(self):
