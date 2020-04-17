@@ -22,20 +22,15 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
--generalize the way in which data is made stationary for live trading
--stationary methods should be specific to each column of the data set (different indicators should be made stationary differentyly)
+-fix save_data
 -why is the reinforcement learning agent giving inconsistent test results?
--make _add_features also update the self.n_features
--fix an error in renko
 -fetching data from the download file appears not to be working
 -update auxiliary scripts to work with the new class based data handling
 -mirror the datastructure of the sim env in the real env
--reevaluate how the agents and enviroment interract, make sure that it can scale for multiple agents
 -trade logging (API will not return all trade history, limited by time).
 -account state logging (should be tied to plotting which currency is held at a given time)
 -Functional, automated trading
 
--understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 -get all plots to show at the same time
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -change feature engineering to better represent how feature engineering works in real time
@@ -52,7 +47,11 @@ from sklearn.preprocessing import StandardScaler
 """
 
 
-"""FEATURES IM UNCERTAIN ABOUT
+"""OTHER FEATURES
+
+-understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
+-make _add_features also update the self.n_features
+-fix an error in renko
 
 -incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
 -be clear about episode/epoch terminology
@@ -94,40 +93,6 @@ def filter_error_from_download_data(input_df):
     return input_df #same
 
 
-def plot_sim_trade_history(df, log, roi=0): #updated based on the "broken file."
-    # df = pd.DataFrame({'Date': data[:, 0], 'BTCClose': np.float_(data[:, 1])})
-
-    assert not df.empty
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1)  # Create the figure
-
-    market_perf = ROI(df.BTCClose.iloc[0], df.BTCClose.iloc[-1])
-    fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-    df.plot( y='BTCClose', ax=ax1)
-
-    for col in df.columns:
-        if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            df.plot(y=col, ax=ax3)
-
-    # df.plot(x='Date', y='Account Value', ax=ax)
-
-    # log['Date'] = df.Date
-    # my_roi = ROI(log.Value.iloc[0], log.Value.iloc[-1])
-    #
-    # log.plot(x='Date', y='Value', ax=ax2)
-
-    my_roi = ROI(log.Value.iloc[0], log.Value.iloc[-1])
-    sharpe = my_roi/log.Value.std()
-    print(f'Sharpe Ratio: {sharpe}') #one or better is good
-    log.plot(y='Value', ax=ax2)
-
-
-    bot, top = plt.ylim()
-    cushion = 200
-    plt.ylim(bot - cushion, top + cushion)
-    fig.autofmt_xdate()
-    plt.show()
-
-
 def get_scaler(env):
     # return scikit-learn scaler object to scale the states
     # Note: you could also populate the replay buffer here
@@ -139,7 +104,7 @@ def get_scaler(env):
     states = []
     for _ in range(env.n_step):
         action = np.random.choice(env.action_space)
-        state, val, reward, done, info = env.step(action)
+        state, val, reward, done = env.step(action)
         states.append(state)
         if done:
             break
@@ -150,16 +115,10 @@ def get_scaler(env):
     return scaler
 
 
-def play_one_episode(agent, env, scaler, is_train, record=False):
+def play_one_episode(agent, env, scaler, is_train):
     # note: after transforming states are already 1xD
-    log_columns = ['Value']
-    log = pd.DataFrame(columns=log_columns)
 
     state, val  = env.reset()
-
-    if record == True:
-        log = log.append(pd.DataFrame.from_records(
-            [dict(zip(log_columns, [val]))]), ignore_index=True)
 
     state = scaler.transform([state])
     done = False
@@ -167,21 +126,15 @@ def play_one_episode(agent, env, scaler, is_train, record=False):
     while not done:
         action = agent.act(state)
         # print(action)
-        next_state, val, reward, done, info = env.step(action)
+        next_state, val, reward, done = env.step(action)
 
-        if record == True:
-            log = log.append(pd.DataFrame.from_records(
-                [dict(zip(log_columns, [val]))]), ignore_index=True)
 
         next_state = scaler.transform([next_state])
         if is_train in ['train']:
             agent.train(state, action, reward, next_state, done)
         state = next_state
 
-    if record:
-        return info['cur_val'], log
-    else:
-        return info['cur_val']
+    return val
 
 
 def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=['USDBTC']):
@@ -226,7 +179,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
 
             # make sure epsilon is not 1!
             # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon_min = 0.000000001
+            agent.epsilon_min = 0.00#1
             agent.epsilon = agent.epsilon_min
 
             # load trained weights
@@ -242,9 +195,15 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
         t0 = datetime.now()
 
         if e == num_episodes - 1:
-            val, state_log = play_one_episode(agent, sim_env, my_scaler, mode, True)
-        else:
-            val = play_one_episode(agent, sim_env, my_scaler, mode)
+            sim_env.should_log = True
+        else: #In case for some reason we record a log and then switch back
+            sim_env.should_log = False
+
+        val = play_one_episode(agent, sim_env, my_scaler, mode)
+
+        if e == num_episodes - 1:
+            sim_env.plot_market_data()
+            sim_env.plot_agent_history()
 
         roi = return_on_investment(val, initial_investment)  # Transform to ROI
         dt = datetime.now() - t0
@@ -276,7 +235,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
     np.save(f'{rewards_folder}/{mode}.npy', portfolio_value)
     print('Rewards saved.')
 
-    plot_sim_trade_history(df, state_log)
+    plt.show()
 
 
 def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols=['BTCUSD']):

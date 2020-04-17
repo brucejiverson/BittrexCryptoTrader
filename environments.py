@@ -17,7 +17,6 @@ def ROI(initial, final):
     return round(final / initial - 1, 2)*100
 
 
-
 class ExchangeEnvironment:
     """All other environment classes inherit from this class. This is done to ensure similar architecture
     between different classes (eg simulated vs real exchange), and to make it easy to change that
@@ -56,7 +55,7 @@ class ExchangeEnvironment:
         #BELOW IS THE OLD WAY THAT INCLUDES THE CURRENT ASSETS HELD
         # calculate size of state (amount of each asset held, value of each asset, volumes, USD/cash, indicators for each asset)
         # self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset
-        self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators + self.n_asset #price and volume, and then the indicators, then last state
+        self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators #+ self.n_asset #price and volume, and then the indicators, then last state
         self.last_action = []
 
         self.assets_owned = None
@@ -65,6 +64,13 @@ class ExchangeEnvironment:
         self.USD = None
         self.df = None
         self.transformed_df = None
+
+
+
+        # log_columns = [*[x for x in self.markets], 'Value']
+        self.should_log = False
+        log_columns = ['Value']
+        self.log = pd.DataFrame(columns=log_columns)
 
         # self.rewards_hist_len = 10
         # self.rewards_hist = np.ones(self.rewards_hist_len)
@@ -354,6 +360,9 @@ class ExchangeEnvironment:
                 if col in [token + 'Open', token + 'High', token + 'Low']:
                     transformed_df.drop(columns=[col], inplace = True)
 
+        #This is here before the transformed_df get made to be stationary
+        self.asset_data = transformed_df.copy().values
+
         #Make the data stationary
         #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
         cols = transformed_df.columns
@@ -363,12 +372,10 @@ class ExchangeEnvironment:
 
         transformed_df.drop(transformed_df.index[0], inplace = True)
         self.transformed_df = transformed_df.dropna()
-        self.asset_data = transformed_df.values
 
-        self.augmented_dicky_fuller()
-        print(self.transformed_df.shape)
-        print(self.df.shape)
+        # self.augmented_dicky_fuller()
 
+        #this assumes that the stationary method used on the df is the same used in _get_state()
         print("DATA TO RUN ON: ")
         print(transformed_df.head())
 
@@ -432,8 +439,25 @@ class ExchangeEnvironment:
         print('Data written.')
 
 
-    def plot_market_data(self):
+    def plot_agent_history(self):
 
+        assert not self.log.empty
+        fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
+
+        market_perf = ROI(self.df.BTCClose.iloc[0], self.df.BTCClose.iloc[-1])
+        fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+        print(self.df.head())
+        self.df.plot( y='BTCClose', ax=ax1)
+
+        my_roi = ROI(self.log.Value.iloc[0], self.log.Value.iloc[-1])
+        sharpe = my_roi/self.log.Value.std()
+        print(f'Sharpe Ratio: {sharpe}') #one or better is good
+
+        self.log.plot(y='Value', ax=ax2)
+        fig.autofmt_xdate()
+
+
+    def plot_market_data(self):
 
         # I had a ton of trouble getting the plots to look right with the dates.
         # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
@@ -449,41 +473,7 @@ class ExchangeEnvironment:
             if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
                 self.df.plot(y=col, ax=ax2)
 
-        bot, top = plt.ylim()
-        cushion = 200
-        plt.ylim(bot - cushion, top + cushion)
         fig.autofmt_xdate()
-        # plt.show()
-
-        """    assert not df.empty
-            fig, (ax1, ax2, ax3) = plt.subplots(3, 1)  # Create the figure
-
-            market_perf = ROI(df.BTCClose.iloc[0], df.BTCClose.iloc[-1])
-            fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-            df.plot( y='BTCClose', ax=ax1)
-
-            for col in df.columns:
-                if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                    df.plot(y=col, ax=ax3)
-
-            # df.plot(x='Date', y='Account Value', ax=ax)
-
-            # log['Date'] = df.Date
-            # my_roi = ROI(log.Value.iloc[0], log.Value.iloc[-1])
-            #
-            # log.plot(x='Date', y='Value', ax=ax2)
-
-            my_roi = ROI(log.Value.iloc[0], log.Value.iloc[-1])
-            sharpe = my_roi/log.Value.std()
-            print(f'Sharpe Ratio: {sharpe}') #one or better is good
-            log.plot(y='Value', ax=ax2)
-
-
-            bot, top = plt.ylim()
-            cushion = 200
-            plt.ylim(bot - cushion, top + cushion)
-            fig.autofmt_xdate()
-            plt.show()"""
 
 
     def plot_stationary_data(self):
@@ -495,9 +485,6 @@ class ExchangeEnvironment:
         for col in self.transformed_df.columns:
                 self.transformed_df.plot(y=col, ax=ax)
 
-        bot, top = plt.ylim()
-        cushion = 200
-        plt.ylim(bot - cushion, top + cushion)
         fig.autofmt_xdate()
 
 
@@ -575,8 +562,10 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         # store the current value of the portfolio here
         cur_val = self._get_val()
-        info = {'cur_val': cur_val}
 
+        if self.should_log:
+            self.log = self.log.append(pd.DataFrame.from_records(
+                [dict(zip(self.log.columns, [cur_val]))]), ignore_index=True)
 
         def log_ROI(initial, final):
             """ Returns the log rate of return, which accounts for how percent changes "stack" over time
@@ -592,7 +581,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         # conform to the Gym API
         #      next state       reward  flag  info dict.
-        return self._get_state(), self._get_val(), reward, done, info
+        return self._get_state(), self._get_val(), reward, done
 
     def _get_state(self):
         """This method returns the state, which is an observation that has been transformed to be stationary.
@@ -611,7 +600,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         #Instituted a try catch here to help with debugging and potentially as a solution to handling invalid/inf values in log
         try:
-
             if self.cur_step == 0:
                 stationary_slice = np.zeros(len(self.asset_data[0]))
 
@@ -619,21 +607,20 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                 slice = self.asset_data[self.cur_step]
                 last_slice = self.asset_data[self.cur_step - 1]
 
-                # stationary_slice = np.empty(len(slice))
-                # stationary_slice = slice - last_slice #simple differencing
                 def transform(x): return np.sign(x)*(np.absolute(x)**.5)
 
-                stationary_slice =  transform(slice) - transform(last_slice)
+                # state =  transform(slice) - transform(last_slice)
                 #below is full way, currently throwing errors
-                # stationary_slice = np.nan_to_num(np.log(slice) - np.log(last_slice)) #this is price and volume
+                # state = np.nan_to_num(np.log(slice) - np.log(last_slice))
 
+                # print(slice[0:n])
                 #BELOW IS THE OLD WAY OF DOING IT
-                # stationary_slice = np.empty(len(slice) - self.n_asset - 1)
-                #
-                # stationary_slice[0:2] = np.log(slice[0:2]) - np.log(last_slice[0:2]) #this is price and volume
-                #
-                # stationary_slice[2:6] = slice[2:6] #these are indicators.
-                # print(stationary_slice)
+                n = self.n_asset*2 #price and volume
+                state[0:n] = slice[0:n] - last_slice[0:n] #simple differencing for price and volume
+                # state[0:n] = np.log(slice[0:n]) - np.log(last_slice[0:2]) #this is price and volume
+
+                state[n::] = slice[n::] #these are indicators.
+                # print(state)
 
         except ValueError:  #Print shit out to help with debugging then throw error
             print("Error in simulated market class, _get_state method.")
@@ -641,11 +628,8 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
             print(state)
             print('Slice: ', end = ' ')
             print(slice)
-            # print(stationary_slice)
+            # print(state)
             raise(ValueError)
-
-        # state[self.n_asset+1:self.state_dim] =  stationary_slice   #Taken from data OLD WAY
-        state = stationary_slice
 
         return state
 
