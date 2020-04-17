@@ -33,7 +33,7 @@ class ExchangeEnvironment:
         self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
         self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
-        self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
+        self.markets = ['USD-ETH']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
 
         self.n_indicators = 2 #This HAS to match the number of features that have been created in the add features thing
@@ -139,37 +139,36 @@ class ExchangeEnvironment:
 
         path = path_dict['updated history']
 
-        # if df.empty or df.index.min() > start_date:  # try to fetch from updated
-        #     print('Fetching data from cumulative data repository.')
-        #
-        #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        #     up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-        #
-        #     if up_df.empty:
-        #         print('Cumulative data repository was empty.')
-        #     else:
-        #         print('Success fetching from cumulative data repository.')
-        #         # up_df.set_index('TimeStamp', drop = True, inplace = True)
-        #         df = df.append(up_df)
-        #
-        # if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
-            #
-            # print('Fetching data from the download file.')
-            # # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-            #
-            # def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-            # cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-            # orig_df = pd.read_csv(path_dict['downloaded history'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
-            # orig_df.set_index('Timestamp', inplace = True, drop = True)
-            # orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh',
-            # 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
-            #
-            # assert not orig_df.empty
-            #
-            # df = df.append(orig_df)
+        if df.empty or df.index.min() > start_date:  # try to fetch from updated
+            print('Fetching data from cumulative data repository.')
+
+            def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+            up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+
+            if up_df.empty:
+                print('Cumulative data repository was empty.')
+            else:
+                print('Success fetching from cumulative data repository.')
+                # up_df.set_index('TimeStamp', drop = True, inplace = True)
+                df = df.append(up_df)
+
+        if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
+
+            print('Fetching data from the download file.')
+            # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+
+            def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+            cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+            orig_df = pd.read_csv(path_dict['downloaded history'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+            orig_df.set_index('Timestamp', inplace = True, drop = True)
+            orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh', 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
+
+            assert not orig_df.empty
+
+            df = df.append(orig_df)
 
         # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
-        # assert(df.index.min() <= start_date)
+        assert(df.index.min() <= start_date)
 
         #This was a different way that was unsuccessful. leaving for reference
         # df = df.index.indexer_between_time(start_date, end_date)
@@ -193,12 +192,13 @@ class ExchangeEnvironment:
         Note that this should only be used before high low open are stripped from the data."""
         # input_df = input_df[['Date', 'BTCClose']]
         formatted_df = df
-        bool_series = df['BTCClose'].notnull()
-        formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
+        # cols = formatted_df.columns #started writing this cause it doesnt work for mulitple currencies
+        # bool_series = df['BTCClose'].notnull()
+        # formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
         formatted_df.sort_index(inplace = True)  #This was causing a warning about future deprecation/changes to pandas
         # formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
 
-        return formatted_df
+        return formatted_df.dropna()
 
 
     def _change_df_granulaty(self, gran):
@@ -221,9 +221,9 @@ class ExchangeEnvironment:
 
         print('Constructing features...')
 
-        def add_sma_as_column(mydata, p):
+        def add_sma_as_column(mydata, token, p):
             # p is a number
-            price = mydata['BTCClose'].values  # returns an np price, faster
+            price = mydata[token + 'Close'].values  # returns an np price, faster
 
             sma = np.empty_like(price)
             for i, item in enumerate(np.nditer(price)):
@@ -242,10 +242,10 @@ class ExchangeEnvironment:
             mydata['SMA_' + str(p)] = indicator  # modifies the input df
 
 
-        def add_renko(blocksize):
+        def add_renko(blocksize, token):
             #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
             # p is a number
-            prices = self.df['BTCClose'].values  # returns an np price, faster
+            prices = self.df[token + 'Close'].values  # returns an np price, faster
 
             renko = np.empty_like(prices)
 
@@ -333,9 +333,11 @@ class ExchangeEnvironment:
 
         # add_renko(renko_block)
 
-        self.df['BTCMACD'] = ta.trend.macd_diff(self.df['BTCClose'], fillna  = True)
-        self.df['BTCRSI'] = ta.momentum.rsi(self.df['BTCClose'], fillna  = True)
-        self.df['BTCRSI'] = self.df['BTCRSI'] - 50 #center at 0
+        for market in self.markets:
+            token = market[4:7] #this is something like 'BTC' or 'ETH'
+
+            self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
+            self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
         # input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
 
         self.df = self._format_df(self.df)
@@ -380,6 +382,48 @@ class ExchangeEnvironment:
         print(transformed_df.head())
 
 
+    def save_data(self, path_dict):
+        # This function writes the information in the original format to the csv file
+        # including new datapoints that have been fetched
+
+        print('Writing data to CSV.')
+
+        path = path_dict['updated history']
+        # # datetimes to strings
+        # df = pd.DataFrame({'Date': data[:, 0], 'BTCClose': np.float_(data[:, 1])})   #convert from numpy array to df
+        #
+        # print('Loading old df...')
+        # def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        # old_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+        # # print(old_df.head())
+        # if old_df.empty:
+        #     print('Cumulative data repository was empty.')
+        # else:
+        #     print('Success fetching from cumulative data repository.')
+        #     # old_df.set_index('TimeStamp', drop = True, inplace = True)
+        #     # print('Old df')
+        #     # print(old_df.head())
+        #     # print(old_df.loc['TimeStamp'])
+        #
+        # df_to_save = df.append(old_df)
+        # print(df_to_save.head())
+        # print(df_to_save.index)
+        df_to_save = self.df.copy()
+        print(df_to_save.head())
+        for col in df_to_save.columns:
+
+            if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                df_to_save.drop(col, axis = 1, inplace = True)
+
+        df_to_save = self._format_df(df_to_save)
+
+        # df_to_save = filter_error_from_download_data(df_to_save)
+        df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
+
+        # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
+        print('Data written.')
+
+
     def augmented_dicky_fuller(self):
         """This method performs an ADF test on the transformed df. Code is borrowed from
          https://www.analyticsvidhya.com/blog/2018/09/non-stationary-time-series-python/
@@ -402,52 +446,18 @@ class ExchangeEnvironment:
             print(' ')
 
 
-    def save_data(self, path_dict):
-        # This function writes the information in the original format to the csv file
-        # including new datapoints that have been fetched
-
-        print('Writing data to CSV.')
-
-        path = path_dict['updated history']
-        # must create new df as df is passed by reference
-        # # datetimes to strings
-        # df = pd.DataFrame({'Date': data[:, 0], 'BTCClose': np.float_(data[:, 1])})   #convert from numpy array to df
-        #
-        # print('Loading old df...')
-        # def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        # old_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-        # # print(old_df.head())
-        # if old_df.empty:
-        #     print('Cumulative data repository was empty.')
-        # else:
-        #     print('Success fetching from cumulative data repository.')
-        #     # old_df.set_index('TimeStamp', drop = True, inplace = True)
-        #     # print('Old df')
-        #     # print(old_df.head())
-        #     # print(old_df.loc['TimeStamp'])
-        #
-        # df_to_save = df.append(old_df)
-        # print(df_to_save.head())
-        # print(df_to_save.index)
-        df_to_save = self.df
-        df_to_save = self._format_df(df_to_save)
-
-        # df_to_save = filter_error_from_download_data(df_to_save)
-        df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
-
-        # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
-        print('Data written.')
-
-
     def plot_agent_history(self):
-
+        """This method plots performance of an agent over time.
+        """
         assert not self.log.empty
         fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
 
-        market_perf = ROI(self.df.BTCClose.iloc[0], self.df.BTCClose.iloc[-1])
-        fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-        print(self.df.head())
-        self.df.plot( y='BTCClose', ax=ax1)
+        for market in self.markets:
+            token = market[4:7]
+
+            market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
+            fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+            self.df.plot( y=token +'Close', ax=ax1)
 
         my_roi = ROI(self.log.Value.iloc[0], self.log.Value.iloc[-1])
         sharpe = my_roi/self.log.Value.std()
@@ -464,9 +474,12 @@ class ExchangeEnvironment:
         assert not self.df.empty
         fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
 
-        market_perf = ROI(self.df.BTCClose.iloc[0], self.df.BTCClose.iloc[-1])
-        fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
-        self.df.plot( y='BTCClose', ax=ax1)
+        for market in self.markets:
+            token = market[4:7]
+
+            market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
+            fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+            self.df.plot( y=token +'Close', ax=ax1)
 
 
         for col in self.df.columns:

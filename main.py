@@ -186,8 +186,10 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
             agent.load(f'{models_folder}/linear.npz')
 
     time_remaining = timedelta(hours=0)
-    market_roi = return_on_investment(sim_env.df.BTCClose.iloc[-1], sim_env.df.BTCClose.iloc[0])
-    print(f'The market changed by {market_roi} % over the designated period.')
+    for market in sim_env.markets:
+        token = market[4:7]
+        market_roi = return_on_investment(sim_env.df[token + 'Close'].iloc[-1], sim_env.df[token + 'Close'].iloc[0])
+        print(f'The {market} pair changed by {market_roi} % over the designated period.')
 
     # play the game num_episodes times
     for e in range(num_episodes):
