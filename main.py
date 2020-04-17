@@ -22,6 +22,8 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
+-generalize the way in which data is made stationary for live trading
+-stationary methods should be specific to each column of the data set (different indicators should be made stationary differentyly)
 -why is the reinforcement learning agent giving inconsistent test results?
 -make _add_features also update the self.n_features
 -fix an error in renko

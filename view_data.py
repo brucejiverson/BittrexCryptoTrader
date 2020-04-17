@@ -2,6 +2,7 @@ from main import *
 from environments import *
 from datetime import datetime, timedelta
 import pandas as pd
+import matplotlib.pyplot as plt
 
 #cryptodatadownload has gaps
 #Place to download: https://www.kaggle.com/jessevent/all-crypto-currencies iSinkInWater, brucejamesiverson@gmail.com, I**********
@@ -17,3 +18,4 @@ end = datetime.now()
 sim_env = SimulatedCryptoExchange(paths, start, end)
 sim_env.plot_market_data()
 sim_env.plot_stationary_data()
+plt.show()

@@ -9,6 +9,7 @@ import numpy as np
 import json
 import ta
 import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import adfuller
 
 
 def ROI(initial, final):
@@ -63,6 +64,7 @@ class ExchangeEnvironment:
 
         self.USD = None
         self.df = None
+        self.transformed_df = None
 
         # self.rewards_hist_len = 10
         # self.rewards_hist = np.ones(self.rewards_hist_len)
@@ -123,45 +125,45 @@ class ExchangeEnvironment:
                             raise(TypeError)
                             print('Retrying...')
                             #The below logic is to handle joinging data from multiple currencies
-                            if i == 0: test = df.append(candle_df)
-                            else: test = df.join(candle_df)
-                            # print('test:')
-                            # print(test.head())
-                            df = df.append(candle_df)
+                if i == 0: test = df.append(candle_df)
+                else: test = df.join(candle_df)
+                # print('test:')
+                # print(test.head())
+                df = df.append(candle_df)
 
         path = path_dict['updated history']
 
-        if df.empty or df.index.min() > start_date:  # try to fetch from updated
-            print('Fetching data from cumulative data repository.')
-
-        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-
-        if up_df.empty:
-            print('Cumulative data repository was empty.')
-        else:
-            print('Success fetching from cumulative data repository.')
-            # up_df.set_index('TimeStamp', drop = True, inplace = True)
-            df = df.append(up_df)
-
-        if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
-
-            print('Fetching data from the download file.')
-            # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-
-            def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-            cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-            orig_df = pd.read_csv(path_dict['downloaded history'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
-            orig_df.set_index('Timestamp', inplace = True, drop = True)
-            orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh',
-            'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
-
-            assert not orig_df.empty
-
-            df = df.append(orig_df)
+        # if df.empty or df.index.min() > start_date:  # try to fetch from updated
+        #     print('Fetching data from cumulative data repository.')
+        #
+        #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        #     up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+        #
+        #     if up_df.empty:
+        #         print('Cumulative data repository was empty.')
+        #     else:
+        #         print('Success fetching from cumulative data repository.')
+        #         # up_df.set_index('TimeStamp', drop = True, inplace = True)
+        #         df = df.append(up_df)
+        #
+        # if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
+            #
+            # print('Fetching data from the download file.')
+            # # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+            #
+            # def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+            # cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+            # orig_df = pd.read_csv(path_dict['downloaded history'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+            # orig_df.set_index('Timestamp', inplace = True, drop = True)
+            # orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh',
+            # 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
+            #
+            # assert not orig_df.empty
+            #
+            # df = df.append(orig_df)
 
         # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
-        assert(df.index.min() <= start_date)
+        # assert(df.index.min() <= start_date)
 
         #This was a different way that was unsuccessful. leaving for reference
         # df = df.index.indexer_between_time(start_date, end_date)
@@ -327,7 +329,7 @@ class ExchangeEnvironment:
 
         self.df['BTCMACD'] = ta.trend.macd_diff(self.df['BTCClose'], fillna  = True)
         self.df['BTCRSI'] = ta.momentum.rsi(self.df['BTCClose'], fillna  = True)
-        # self.df['BTCRSI'] = self.df['BTCRSI'] - 50 #center at 0
+        self.df['BTCRSI'] = self.df['BTCRSI'] - 50 #center at 0
         # input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
 
         self.df = self._format_df(self.df)
@@ -338,12 +340,13 @@ class ExchangeEnvironment:
 
         print("ORIGINAL DATA: ")
         print(self.df.head())
-        df = self._change_df_granulaty(10)
+        df = self._change_df_granulaty(5)
 
         self._add_features()
 
         df_cols = self.df.columns
-        transformed_df = self.df
+        transformed_df = self.df.copy()
+
         # Strip out open high low close
         for market in self.markets:
             token = market[4:7]
@@ -352,17 +355,45 @@ class ExchangeEnvironment:
                     transformed_df.drop(columns=[col], inplace = True)
 
         #Make the data stationary
-        #log(0) = -inf. Some indicators have
+        #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
+        cols = transformed_df.columns
+        for i in range(2*self.n_asset): #loop through prices and volumnes
+            col = cols[i]
+            transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1)
+
+        transformed_df.drop(transformed_df.index[0], inplace = True)
+        self.transformed_df = transformed_df.dropna()
+        self.asset_data = transformed_df.values
+
+        self.augmented_dicky_fuller()
+        print(self.transformed_df.shape)
+        print(self.df.shape)
 
         print("DATA TO RUN ON: ")
         print(transformed_df.head())
-        self.transformed_df = transformed_df
-        self.asset_data = transformed_df.values
-
 
 
     def augmented_dicky_fuller(self):
-        pass
+        """This method performs an ADF test on the transformed df. Code is borrowed from
+         https://www.analyticsvidhya.com/blog/2018/09/non-stationary-time-series-python/
+         Quote: If the test statistic is less than the critical value, we can reject the null
+         hypothesis (aka the series is stationary). When the test statistic is greater
+         than the critical value, we fail to reject the null hypothesis (which means
+         the series is not stationary)."""
+
+        #Perform Dickey-Fuller test:
+        print ('Results of Dickey-Fuller Test:')
+        index=['Test Statistic','p-value','#Lags Used','Number of Observations Used', 'Success']
+        for col in self.transformed_df.columns:
+            print('Results for ' + col)
+            dftest = adfuller(self.transformed_df[col], autolag='AIC')
+            success = dftest[0] < dftest[4]['1%']
+            dfoutput = pd.Series([*dftest[0:4], success], index = index)
+            for key,value in dftest[4].items():
+               dfoutput['Critical Value (%s) conf.'%key] = value
+            print (dfoutput)
+            print(' ')
+
 
     def save_data(self, path_dict):
         # This function writes the information in the original format to the csv file
@@ -422,7 +453,7 @@ class ExchangeEnvironment:
         cushion = 200
         plt.ylim(bot - cushion, top + cushion)
         fig.autofmt_xdate()
-        plt.show()
+        # plt.show()
 
         """    assert not df.empty
             fig, (ax1, ax2, ax3) = plt.subplots(3, 1)  # Create the figure
@@ -453,6 +484,21 @@ class ExchangeEnvironment:
             plt.ylim(bot - cushion, top + cushion)
             fig.autofmt_xdate()
             plt.show()"""
+
+
+    def plot_stationary_data(self):
+        assert not self.transformed_df.empty
+        fig, ax = plt.subplots(1, 1)  # Create the figure
+
+        fig.suptitle('Transformed data', fontsize=14, fontweight='bold')
+
+        for col in self.transformed_df.columns:
+                self.transformed_df.plot(y=col, ax=ax)
+
+        bot, top = plt.ylim()
+        cushion = 200
+        plt.ylim(bot - cushion, top + cushion)
+        fig.autofmt_xdate()
 
 
 class SimulatedCryptoExchange(ExchangeEnvironment):
