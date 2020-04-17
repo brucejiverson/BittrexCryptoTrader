@@ -33,7 +33,7 @@ class ExchangeEnvironment:
         self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
         self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
-        self.markets = ['USD-ETH']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
+        self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
 
         self.n_indicators = 2 #This HAS to match the number of features that have been created in the add features thing
@@ -65,15 +65,10 @@ class ExchangeEnvironment:
         self.df = None
         self.transformed_df = None
 
-
-
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
         log_columns = ['Value']
         self.log = pd.DataFrame(columns=log_columns)
-
-        # self.rewards_hist_len = 10
-        # self.rewards_hist = np.ones(self.rewards_hist_len)
 
 
     def _process_candle_dict(self, candle_dictionary, market):

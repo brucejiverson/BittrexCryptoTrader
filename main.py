@@ -25,19 +25,16 @@ from sklearn.preprocessing import StandardScaler
 -fix save_data
 -why is the reinforcement learning agent giving inconsistent test results?
 -fetching data from the download file appears not to be working
--update auxiliary scripts to work with the new class based data handling
 -mirror the datastructure of the sim env in the real env
 -trade logging (API will not return all trade history, limited by time).
--account state logging (should be tied to plotting which currency is held at a given time)
 -Functional, automated trading
 
--get all plots to show at the same time
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -change feature engineering to better represent how feature engineering works in real time
 """
 
 """Whats sean working on?
--play one episode should be a part of sim env
+-play one episode should be a part of sim env?
 -Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
 -enable data scraping to handle multiple currencies -- see dataframe.join method or maybe merge
 
@@ -137,7 +134,7 @@ def play_one_episode(agent, env, scaler, is_train):
     return val
 
 
-def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=['USDBTC']):
+def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
     # Mode should be a string, either train or test or run
     # maybe it would be helpful to run this through command line argv etc
 
@@ -216,7 +213,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes, symbols=[
 
         print(f"episode: {e + 1}/{num_episodes}, ", end = ' ')
         print(f"end value: {val:.2f}, episode roi: {roi:.2f}%, ", end = ' ')
-        print(f"time remaining: {time_remaining + timedelta(seconds = 2)}")
+        print(f"time remaining: {time_remaining + timedelta(seconds = 3)}")
         portfolio_value.append(val)  # append episode end portfolio value
 
     # save the weights when we are done
@@ -338,7 +335,6 @@ def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols
 
 #cryptodatadownload has gaps
 #Place to download: https://www.kaggle.com/jessevent/all-crypto-currencies iSinkInWater, brucejamesiverson@gmail.com, I**********
-symbols = ['BTCUSD'] #Example: 'BTCUSD'
 
 #The below should be updated to be simplified to use parent directory? unsure how that works...
 #https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
@@ -348,7 +344,7 @@ paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data
 'secret': "/Users/biver/Documents/crypto_data/secrets.json",
 'rewards': 'agent_rewards',
 'models': 'agent_models',
-'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols[0] + '.csv'}
+'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testingBTCUSD.csv'}
 
 
 if __name__ == '__main__':
@@ -379,4 +375,4 @@ if __name__ == '__main__':
         # end = datetime(2018, 4, 1)
 
 
-    run_agent_sim(mode, paths, start, end, 400, symbols = symbols)
+    run_agent_sim(mode, paths, start, end, 400)
