@@ -83,11 +83,8 @@ class ExchangeEnvironment:
 
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
-        log_columns = ['Total Value', 'BTC']
+        log_columns = ['BTC', 'Total Value']
         self.log = pd.DataFrame(columns=log_columns)
-
-
-
 
     def _process_candle_dict(self, candle_dictionary, market):
         # Dataframe formatted the same as in other functions
@@ -470,6 +467,8 @@ class ExchangeEnvironment:
     def plot_agent_history(self):
         """This method plots performance of an agent over time.
         """
+        print(self.log.head())
+
         assert not self.log.empty
         fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
 
@@ -605,7 +604,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         if self.should_log:
             self.log = self.log.append(pd.DataFrame.from_records(
-                [dict(zip(self.log.columns, [cur_val, btc_amt]))]), ignore_index=True)
+                [dict(zip(self.log.columns, [btc_amt, cur_val]))]), ignore_index=True)
 
         def log_ROI(initial, final):
             """ Returns the log rate of return, which accounts for how percent changes "stack" over time
