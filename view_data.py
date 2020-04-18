@@ -11,11 +11,12 @@ import matplotlib.pyplot as plt
 # symbols = ['BTCUSD', 'ETHUSD', 'LTCUSD'] #Example: 'BTCUSD'
 # markets = [sym[3:6] + '-' + sym[0:3] for sym in symbols]
 
-start = datetime(2016, 1, 1)
+start = datetime(2012, 1, 1)
 end = datetime.now()
 
 
-sim_env = SimulatedCryptoExchange(paths, start, end)
+sim_env = SimulatedCryptoExchange(start, end)
+sim_env.save_data()
 sim_env.plot_market_data()
 sim_env.plot_stationary_data()
 plt.show()

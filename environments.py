@@ -1,5 +1,4 @@
 from bittrex.bittrex import *
-from main import *
 
 import pandas as pd
 import math
@@ -10,6 +9,22 @@ import json
 import ta
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
+
+
+#cryptodatadownload has gaps
+#Place to download: kaggle  iSinkInWater, brucejamesiverson@gmail.com, I**********
+#This has data for all currencies, 10 GB, too big for now https://www.kaggle.com/jorijnsmit/binance-full-history
+#
+
+#The below should be updated to be simplified to use parent directory? unsure how that works...
+#https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
+
+paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
+'cum data csv': 'C:/Python Programs/crypto_trader/historical data/cumulative_data_all_currencies.csv',
+'secret': "/Users/biver/Documents/crypto_data/secrets.json",
+'rewards': 'agent_rewards',
+'models': 'agent_models',
+'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testingBTCUSD.csv'}
 
 
 def ROI(initial, final):
@@ -36,7 +51,7 @@ class ExchangeEnvironment:
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
 
-        self.n_indicators = 2 #This HAS to match the number of features that have been created in the add features thing
+        self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
 
         portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
         # The possible portions of the portfolio that could be allocated to a single asset
@@ -56,7 +71,7 @@ class ExchangeEnvironment:
         # calculate size of state (amount of each asset held, value of each asset, volumes, USD/cash, indicators for each asset)
         # self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset
         self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators #+ self.n_asset #price and volume, and then the indicators, then last state
-        self.last_action = []
+        self.action_list[0] #The action where nothing is owned
 
         self.assets_owned = None
         self.asset_prices = [0]*self.n_asset
@@ -87,7 +102,7 @@ class ExchangeEnvironment:
         return df
 
 
-    def fetch_data(self, path_dict, start_date, end_date):
+    def fetch_data(self, start_date, end_date):
         """This function pulls data from the exchange, the cumulative repository, and the data download in that order
         depending on the input date range."""
 
@@ -126,26 +141,32 @@ class ExchangeEnvironment:
                             raise(TypeError)
                             print('Retrying...')
                             #The below logic is to handle joinging data from multiple currencies
-                if i == 0: test = df.append(candle_df)
+                if i == 0: test = df.append(candle_df, sort = True)
                 else: test = df.join(candle_df)
-                # print('test:')
-                # print(test.head())
-                df = df.append(candle_df)
+                # print('CANDLE DF:')
+                # print(candle_df.tail())
+                df = df.append(candle_df, sort = True) #ok this works
+                # print(df.tail())
 
-        path = path_dict['updated history']
+        path = paths['cum data csv']
 
-        if df.empty or df.index.min() > start_date:  # try to fetch from updated
-            print('Fetching data from cumulative data repository.')
-
-            def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-            up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-
-            if up_df.empty:
-                print('Cumulative data repository was empty.')
-            else:
-                print('Success fetching from cumulative data repository.')
-                # up_df.set_index('TimeStamp', drop = True, inplace = True)
-                df = df.append(up_df)
+        # if df.empty or df.index.min() > start_date:  # try to fetch from updated
+        #     print('Fetching data from cumulative data repository.')
+        #
+        #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        #     up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+        #
+        #     assert not up_df.empty
+        #     print('Success fetching from cumulative data repository.')
+        #     up_df.set_index('TimeStamp', drop = True, inplace = True)
+        #     # print(df.tail())
+        #     # print('CUM DATA DF:')
+        #     # print(up_df.head())
+        #     # print(up_df.tail())
+        #     df = df.append(up_df, sort = True)
+        #     # print('DATA INCL CUMULATIVE DATA REPOSITORY:')
+        #     # print(df.head())
+        #     # print(df.tail())
 
         if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
 
@@ -154,15 +175,21 @@ class ExchangeEnvironment:
 
             def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
             cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-            orig_df = pd.read_csv(path_dict['downloaded history'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+            orig_df = pd.read_csv(paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+
+            name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
+            orig_df.rename(columns= name_map, inplace=True)
             orig_df.set_index('Timestamp', inplace = True, drop = True)
-            orig_df.rename(columns={'O': 'BTCOpen', 'H': 'BTCHigh', 'L': 'BTCLow', 'C': 'BTCClose', 'V': 'BTCVolume'}, inplace=True)
 
             assert not orig_df.empty
 
-            df = df.append(orig_df)
+            df = df.append(orig_df, sort = True)
+            df.sort_index(inplace = True) #apparently this is necessary otherwise the orig_df is in reverse order
 
         # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
+        # print(df.index.min())
+        # print(start_date)
+
         assert(df.index.min() <= start_date)
 
         #This was a different way that was unsuccessful. leaving for reference
@@ -174,26 +201,68 @@ class ExchangeEnvironment:
             #drop column if necessary
             if not market in self.markets: df.drop(columns=[col], inplace = True)
 
-        df = df[df.index > start_date]
-        df = df[df.index < end_date]
+        df = df.loc[df.index > start_date] #not the culprit in the altered gran
+        df = df.loc[df.index < end_date]
 
-        df = self._format_df(df)
-
-        self.df = df
+        self.df = self._format_df(df)
 
 
     def _format_df(self, df):
         """This function formats the dataframe according to the assets that are in it. Needss to be updated to handle multiple assets.
         Note that this should only be used before high low open are stripped from the data."""
         # input_df = input_df[['Date', 'BTCClose']]
-        formatted_df = df
+        formatted_df = df.copy()
+        formatted_df = formatted_df.loc[~formatted_df.index.duplicated(keep = 'first')] #this is intended to remove duplicates. ~ flips bits
+
         # cols = formatted_df.columns #started writing this cause it doesnt work for mulitple currencies
         # bool_series = df['BTCClose'].notnull()
         # formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
-        formatted_df.sort_index(inplace = True)  #This was causing a warning about future deprecation/changes to pandas
+
+        formatted_df.sort_index(inplace = True)
         # formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
 
         return formatted_df.dropna()
+
+
+    def prepare_data(self):
+        """This method takes the raw candle data and constructs features, changes granularity, etc."""
+
+        print("ORIGINAL DATA: ")
+        print(self.df.head())
+        print(self.df.tail())
+        # df = self._change_df_granularity(10)
+
+        self._add_features_to_df()
+
+        df_cols = self.df.columns
+        transformed_df = self.df.copy()
+
+        # Strip out open high low close
+        for market in self.markets:
+            token = market[4:7]
+            for col in df_cols:
+                if col in [token + 'Open', token + 'High', token + 'Low']:
+                    transformed_df.drop(columns=[col], inplace = True)
+
+        #This is here before the transformed_df get made to be stationary
+        self.asset_data = transformed_df.copy().values
+
+        # #These lines make the data stationary for stationarity testing
+        # #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
+        # cols = transformed_df.columns
+        # for i in range(2*self.n_asset): #loop through prices and volumnes
+        #     col = cols[i]
+        #     transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1)
+        #
+        # transformed_df.drop(transformed_df.index[0], inplace = True)
+
+        # self.augmented_dicky_fuller()
+
+        #this assumes that the stationary method used on the df is the same used in _get_state()
+        print("DATA TO RUN ON: ")
+        print(transformed_df.head())
+        print(transformed_df.tail())
+        self.transformed_df = transformed_df.copy()
 
 
     def _change_df_granulaty(self, gran):
@@ -211,7 +280,7 @@ class ExchangeEnvironment:
         #     raise(ValueError)
         #     return input_df
 
-    def _add_features(self, renko_block = 40):
+    def _add_features_to_df(self, renko_block = 40):
         """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
 
         print('Constructing features...')
@@ -331,80 +400,34 @@ class ExchangeEnvironment:
         for market in self.markets:
             token = market[4:7] #this is something like 'BTC' or 'ETH'
 
+            self.df[token + 'OBV'] = ta.volume.on_balance_volume(self.df[token + 'Close'], self.df[token + 'Volume'], fillna  = True)
+            self.df[token + 'OBV'] = self.df[token + 'OBV'] - self.df[token + 'OBV'].shift(1)
             self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
             self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
-        # input_df['BTCOBV'] = ta.volume.on_balance_volume(input_df['BTCClose'], input_df['BTCVolume'], fillna  = True)
-
-        self.df = self._format_df(self.df)
 
 
-    def prepare_data(self):
-        """This method takes the raw candle data and constructs features, changes granularity, etc."""
-
-        print("ORIGINAL DATA: ")
-        print(self.df.head())
-        df = self._change_df_granulaty(5)
-
-        self._add_features()
-
-        df_cols = self.df.columns
-        transformed_df = self.df.copy()
-
-        # Strip out open high low close
-        for market in self.markets:
-            token = market[4:7]
-            for col in df_cols:
-                if col in [token + 'Open', token + 'High', token + 'Low']:
-                    transformed_df.drop(columns=[col], inplace = True)
-
-        #This is here before the transformed_df get made to be stationary
-        self.asset_data = transformed_df.copy().values
-
-        #Make the data stationary
-        #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
-        cols = transformed_df.columns
-        for i in range(2*self.n_asset): #loop through prices and volumnes
-            col = cols[i]
-            transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1)
-
-        transformed_df.drop(transformed_df.index[0], inplace = True)
-        self.transformed_df = transformed_df.dropna()
-
-        # self.augmented_dicky_fuller()
-
-        #this assumes that the stationary method used on the df is the same used in _get_state()
-        print("DATA TO RUN ON: ")
-        print(transformed_df.head())
-
-
-    def save_data(self, path_dict):
+    def save_data(self):
         # This function writes the information in the original format to the csv file
         # including new datapoints that have been fetched
 
         print('Writing data to CSV.')
 
-        path = path_dict['updated history']
-        # # datetimes to strings
-        # df = pd.DataFrame({'Date': data[:, 0], 'BTCClose': np.float_(data[:, 1])})   #convert from numpy array to df
-        #
-        # print('Loading old df...')
-        # def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        # old_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-        # # print(old_df.head())
-        # if old_df.empty:
-        #     print('Cumulative data repository was empty.')
-        # else:
-        #     print('Success fetching from cumulative data repository.')
-        #     # old_df.set_index('TimeStamp', drop = True, inplace = True)
-        #     # print('Old df')
-        #     # print(old_df.head())
-        #     # print(old_df.loc['TimeStamp'])
-        #
-        # df_to_save = df.append(old_df)
-        # print(df_to_save.head())
-        # print(df_to_save.index)
-        df_to_save = self.df.copy()
-        print(df_to_save.head())
+        path = paths['cum data csv']
+
+        # datetimes to strings
+        print('Fetching data from the download file...', end = ' ')
+        # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+
+        def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+        cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+        orig_df = pd.read_csv(paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+
+        name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
+        orig_df.rename(columns= name_map, inplace=True)
+        orig_df.set_index('Timestamp', inplace = True, drop = True)
+        print('Fetched.')
+        df_to_save = self.df.append(orig_df, sort = True)
+
         for col in df_to_save.columns:
 
             if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
@@ -508,13 +531,15 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
       - associated indicators for each asset
     """
 
-    def __init__(self, path_dict, start, end, initial_investment=100):
+    def __init__(self, start, end, initial_investment=100):
         ExchangeEnvironment.__init__(self)
 
-        # data
+        """The data, for asset_data can be thought of as nested arrays, where indexing the
+        highest order array gives a snapshot of all data at a particular time, and information at the point
+        in time can be captured by indexing that snapshot."""
         self.asset_data = None
 
-        self.fetch_data(path_dict, start, end)
+        self.fetch_data(start, end)
         self.prepare_data()
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, n_features = self.asset_data.shape
@@ -525,6 +550,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         self.mean_spread = .0001 #Fraction of asset value typical for the spread
 
         self.reset()
+
 
     def reset(self):
         # Resets the environement to the initial state
@@ -544,6 +570,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         # print(self.n_asset)
 
         return self._get_state(), self._get_val() # Return the state vector (same as obervation for now)
+
 
     def step(self, action):
         # Performs an action in the enviroment, and returns the next state and reward
@@ -591,6 +618,11 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         #      next state       reward  flag  info dict.
         return self._get_state(), self._get_val(), reward, done
 
+
+    def _get_val(self):
+        return self.assets_owned.dot(self.asset_prices) + self.USD
+
+
     def _get_state(self):
         """This method returns the state, which is an observation that has been transformed to be stationary.
         Note that the state could later be expanded to be a stack of the current state and previous states
@@ -598,7 +630,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         The structure of the state IS NOW [value of each asset, volumes, indicators]
         For reference if reconstructing the state, the data is ordered in self.asset_data as [asset prices, asset volumes, asset indicators]"""
 
-        # print(self.state_dim)
         #assets_owned, USD, volume, indicators
         state = np.empty(self.state_dim)
 
@@ -627,7 +658,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                 state[0:n] = slice[0:n] - last_slice[0:n] #simple differencing for price and volume
                 # state[0:n] = np.log(slice[0:n]) - np.log(last_slice[0:2]) #this is price and volume
 
-                state[n::] = slice[n::] #these are indicators.
+                state[n::] = slice[n::] #these are indicators. Valdiated they are preserved
                 # print(state)
 
         except ValueError:  #Print shit out to help with debugging then throw error
@@ -641,8 +672,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         return state
 
-    def _get_val(self):
-        return self.assets_owned.dot(self.asset_prices) + self.USD
 
     def _trade(self, action):
         # index the action we want to perform
@@ -705,7 +734,7 @@ class BittrexExchange(ExchangeEnvironment):
     logging account value over time, displaying account value over time, retrieving information on prices, balances, and orders from
     Bittrex, and uses a similar 'act' method to interface with agents."""
 
-    def __init__(self, path_dict, money_to_use=10):
+    def __init__(self,   money_to_use=10):
         ExchangeEnvironment.__init__(self)
 
         # instance attributes
@@ -715,14 +744,18 @@ class BittrexExchange(ExchangeEnvironment):
 
         # self.state, self.cur_val = self.reset()
 
-        self.get_account_health()
+        self.print_account_health()
 
 
     def reset(self):
         # Resets the environement to the initial state
+        end = datetime.now()
+        start = end - timedelta(days = 1)
+        self.fetch_data(start, end)
+        self.prepare_data()
 
         self.cancel_all_orders()
-        self.get_prices(self.markets[0])
+        self.get_current_prices()
         self.get_all_balances()
 
         # #Put all money into USD
@@ -731,100 +764,7 @@ class BittrexExchange(ExchangeEnvironment):
         #     while not success:
         #         success = self._trade(-self.assets_owned[0])
 
-        self.assets_owned = np.zeros(self.n_asset)
-        self.last_action = self.action_list[0] #The action where nothing is owned
-        """ the data, for asset_data can be thought of as nested arrays, where indexing the
-        highest order array gives a snapshot of all data at a particular time, and information at the point
-        in time can be captured by indexing that snapshot."""
-
         return self._get_state(), self._return_val() # Return the state vector (same as obervation for now)
-
-
-    def get_prices(self, currency_pair):
-        """This method retrieves up to date price information from the exchange.
-        To Do: make this get multiple currencies."""
-
-        print('Fetching prices... ', end = ' ')
-        count = 3
-        while True:
-            ticker = self.bittrex_obj_1_1.get_ticker(currency_pair)
-            #Change this to make sure that the check went through
-            # Check that an order was entered
-            if not ticker['success']:
-                print('_get_prices failed. Ticker message: ', end = ' ')
-                print(ticker['message'])
-
-                if count == 0:
-                    print('get_prices has failed. exiting the method...')
-                    break
-                else:
-                    count -= 1
-                    time.sleep(1)
-                    print('Retrying...')
-            else: #success
-                # print(ticker['result'])
-                print('Sucess.')
-                self.asset_prices[0] = ticker['result']['Last']
-                break
-
-
-    def get_all_balances(self):
-        """This method retrieves the account balanes for each currency including USD from the exchange."""
-
-        print('Fetching account balances...', end = ' ')
-        self.assets_owned = np.zeros(self.n_asset)
-        while True:
-            check1 = False
-            balance_response = self.bittrex_obj_1_1.get_balance('BTC')
-            if balance_response['success']:
-                print('BTC balance fetched.', end = ' ')
-                amount = balance_response['result']['Balance']
-                #Find a more legant way of checking if 'None'
-                if amount is None:
-                    self.assets_owned[0] = 0
-                else: self.assets_owned[0] = amount
-
-                # try:
-                #     if self.assets_owned[0] > 0:
-                #         pass
-                # except TypeError: #BTC_balance is none
-                check1 = True
-
-
-            balance_response = self.bittrex_obj_1_1.get_balance('USD')
-            if balance_response['success']:
-                print('USD balance fetched.')
-                self.USD = balance_response['result']['Balance']
-
-                #Find a more legant way of checking if 'None'
-                try:
-                    if self.USD > 0:
-                        pass
-                except TypeError: #BTC_balance is none
-                        self.USD = 0
-                if check1:
-                    break
-
-
-    def get_account_health(self):
-        """This method prints out a variety of information about the account. In the future this should print a dataframe
-        for cleaner formatting (if mutliple currency trading strategies are implemented)"""
-
-        self.get_all_balances()
-        self.get_prices('USD-BTC')
-        cur_val = self._return_val()
-
-        print('')
-        print('ACCOUNT SUMMARY: ')
-        print('There is $' + str(self.USD) + ' USD in your account.')
-        print('There is ' + str(round(self.assets_owned[0],2)) + ' BTC in your account.')
-        print('Current value of the accout is: $' + str(cur_val) + '.')
-        print('The current value of 1 BTC is $' + str(self.asset_prices[0]))
-
-
-    def _calculate_indicators(self):
-        """This method calculates all of the indicators defined in the initialization up to the current price point."""
-        pass
 
 
     def _get_state(self):
@@ -841,8 +781,22 @@ class BittrexExchange(ExchangeEnvironment):
         return state
 
 
+    def _act(self, action):
+        # index the action we want to perform
+        # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
+
+        action_vec = self.action_list[action] #a vectyor like [0.1, 0.5] own 0.1*val of BTC, 0.5*val of ETH etc.
+
+        if action_vec != self.last_action:  # if attmepting to change state
+
+            #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
+            #Calculate the changes needed for each asset
+            delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
+
+
     def _return_val(self):
-        """ This method returns the current value of the account that the object is tied to in USD."""
+        """ This method returns the current value of the account that the object
+        is tied to in USD. VALIDTED"""
         try:
             return self.assets_owned.dot(self.asset_prices) + self.USD
         except TypeError:
@@ -852,8 +806,99 @@ class BittrexExchange(ExchangeEnvironment):
             return 0
 
 
+    def get_current_prices(self):
+        """This method retrieves up to date price information from the exchange.
+        VALIDATED"""
+
+        for i, market in enumerate(self.markets):
+            token = market[4:7]
+            print('Fetching' + token + 'price... ', end = ' ')
+            attempts_left = 3
+            while True:
+                ticker = self.bittrex_obj_1_1.get_ticker(market)
+                #Change this to make sure that the check went through
+                # Check that an order was entered
+                if not ticker['success']:
+                    print('_get_prices failed. Ticker message: ', end = ' ')
+                    print(ticker['message'])
+
+                    if attempts_left == 0:
+                        print('get_current_prices has failed. exiting the method...')
+                        break
+                    else:
+                        attempts_left -= 1
+                        time.sleep(1)
+                        print('Retrying...')
+                else: #success
+                    # print(ticker['result'])
+                    print('Sucess.')
+                    self.asset_prices[i] = ticker['result']['Last']
+                    break
+
+
+    def get_all_balances(self):
+        """This method retrieves the account balanes for each currency including
+         USD from the exchange."""
+
+        print('Fetching account balances...', end = ' ')
+
+        self.assets_owned = np.zeros(self.n_asset)
+        for i, currency_pair in enumerate(self.markets):
+            token = currency_pair[4:7]
+            attempts_left = 3
+            while attempts_left >= 0:
+                balance_response = self.bittrex_obj_1_1.get_balance(token)
+
+                if balance_response['success']:
+                    print(token + ' balance fetched.', end = ' ')
+                    amount = balance_response['result']['Balance']
+
+                    if amount is None:
+                        self.assets_owned[i] = 0
+                    else: self.assets_owned[i] = amount
+                    break
+
+                attempts_left -= 1
+
+        #Get USD
+        attempts_left = 3
+        while attempts_left >= 0:
+            balance_response = self.bittrex_obj_1_1.get_balance('USD')
+            if balance_response['success']:
+                print('USD balance fetched.')
+                amount = balance_response['result']['Balance']
+
+                if amount is None:
+                    self.USD = 0
+                else: #Balance is 0
+                    self.USD = amount
+                break
+
+            attempts_left -= 1
+
+
+    def print_account_health(self):
+        """This method prints out a variety of information about the account. In the future this should print a dataframe
+        for cleaner formatting (if mutliple currency trading strategies are implemented)"""
+
+        self.get_all_balances()
+        self.get_current_prices()
+
+        labels = ['USD', 'BTC', 'Account Value', 'BTC Price']
+        info = [self.USD, self.assets_owned[0], self._return_val(), self.asset_prices[0]]
+        df = pd.Series(info, index = labels)
+
+        print(df)
+
+
+    def _calculate_indicators(self):
+        """This method calculates all of the indicators defined in the initialization up to the current price point."""
+        pass
+
+
     def cancel_all_orders(self):
-        """This method looks for any open orders associated with the account, and cancels those orders."""
+        """This method looks for any open orders associated with the account,
+        and cancels those orders. VALIDATED"""
 
         print('Canceling any open orders...')
         open_orders = self.bittrex_obj_1_1.get_open_orders('USD-BTC')
@@ -875,11 +920,11 @@ class BittrexExchange(ExchangeEnvironment):
     def _trade(self, currency_pair, amount):
         """This method will execute a limit order trade for the 'amount' in USD passed. The limit is set at a price
         similar to the mean of the order book. THe method accepts positive or negative values in the 'amount' field.
-        A positive value indicates buying, and a negative value indicates selling. """
+        A positive value indicates buying, and a negative value indicates selling. VALIDATED"""
 
         # Note that bittrex exchange is based in GMT 8 hours ahead of CA
 
-        self.get_prices(currency_pair)
+        self.get_current_prices()
 
 
         start_time = datetime.now() #this is for tracking how long the order has been open
@@ -924,10 +969,9 @@ class BittrexExchange(ExchangeEnvironment):
                 trade = _process_order_data(order_data)
                 # print(trade)
 
-
     def _monitor_order_status(self, uuid, time_limit = 30):
         """This method loops for a maximum duration of timelimit seconds, checking the status of the open order uuid that is passed.
-        If the timelimit is reached, the order is cancelled. If the """
+        If the timelimit is reached, the order is cancelled. VALIDATED"""
 
         start_time = datetime.now()
         # Loop to see if the order has been filled
@@ -986,7 +1030,7 @@ class BittrexExchange(ExchangeEnvironment):
         """This method retrieves trade history for all currency pairs from the exchange, creates a dataframe with the orders,
         and then appends them to the CSV trade log. Trade history is stored locally since the bittrex API only returns trades
         that happened within a recent timeframe. I am not sure what that time frame is."""
-
+        # global paths
         #This section fetches order data from the exchange
         for i, currency_pair in enumerate(self.markets):
             order_history_dict = self.bittrex_obj_1_1.get_order_history(market = currency_pair)
@@ -1007,7 +1051,7 @@ class BittrexExchange(ExchangeEnvironment):
         #Should check right here if there is actually new data
 
         #This section reads in the order log, and appends any new data
-        save_path = path_dict['order log']
+        save_path = paths['order log']
 
         try:
             def dateparse(x):
@@ -1031,16 +1075,3 @@ class BittrexExchange(ExchangeEnvironment):
         except KeyError:
             print('Order log is empty.')
         print(df)
-
-
-    def _act(self, action):
-        # index the action we want to perform
-        # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
-
-        action_vec = self.action_list[action] #a vectyor like [0.1, 0.5] own 0.1*val of BTC, 0.5*val of ETH etc.
-
-        if action_vec != self.last_action:  # if attmepting to change state
-
-            #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
-            #Calculate the changes needed for each asset
-            delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]

@@ -145,14 +145,19 @@ class SimpleAgent():
         # This is the policy
         #Currently assumes only bitcoin is in use, and that RSI is the last feature in the state
         # print(state)
-        rsi_val = state[0][-1]
-        # macd = state[0][-2]
-        renko = state[0][-3]
-        if rsi_val < 1 and renko > -7: #buy
+        rsi = state[0][-1]
+        macd = state[0][-2]
+        obv = state[0][-3]
+        # renko = state[0][-3]
+        # if rsi < 1 and renko > -7: #buy
+        # if rsi < -2.5: #-2.5 gives no downdraw, 2.81% over 10 days. Positive vals no good
+        # if macd > 1: # [0] 6%, [1] 8.68% over 10 days
+        # if macd > 0 and rsi < -1: # 8.7% over 10 days [0,0]
+        if obv < -.5: #[-.1] 10.22% [-.5] 9.35% better downdraw. [-1] 8.1% no downdraw 10 days.
+        # if obv < -.1 and macd > 1 and rsi < -.5:
             return 1
         else: #sell
             return 0
-
 
 
         if np.random.rand() <= self.epsilon:

@@ -6,7 +6,7 @@ import json
 
 env = BittrexExchange(paths, money_to_use = 5)
 # env._trade('USD-BTC', 5)
-env.get_all_order_history()
+# env.get_account_health()
 
 # num_trades = 5
 #

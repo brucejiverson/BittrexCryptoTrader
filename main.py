@@ -23,11 +23,16 @@ from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
 -fix save_data
--why is the reinforcement learning agent giving inconsistent test results?
--fetching data from the download file appears not to be working
+-why are all agents giving inconsistent test results?
+-somewhere data granularity is getting fucked
 -mirror the datastructure of the sim env in the real env
 -trade logging (API will not return all trade history, limited by time).
 -Functional, automated trading
+    -get data handling integrated
+    -make get state work
+    -make act work
+    -make a 'live' method, I figure it should go for a day
+
 
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -change feature engineering to better represent how feature engineering works in real time
@@ -154,16 +159,15 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
     batch_size = 32  # sampleing from replay memory
     initial_investment = 100
 
-    markets = [sym[3:6] + '-' + sym[0:3] for sym in symbols]
-
-    sim_env = SimulatedCryptoExchange(path_dict, start_date, end_date, initial_investment)
-    sim_env.save_data(path_dict)
+    sim_env = SimulatedCryptoExchange(start_date, end_date, initial_investment)
+    # sim_env.save_data(path_dict)
     # print(sim_env.df.head())
 
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
 
-    agent = DQNAgent(state_size, action_size)#DQNAgent(state_size, action_size)
+    # agent = DQNAgent(state_size, action_size)
+    agent = SimpleAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)
 
     if mode == 'test':
@@ -333,20 +337,6 @@ def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols
         market_performance = return_on_investment(price, market_start)
         print('Market Performance: ', market_performance, ' %')
 
-#cryptodatadownload has gaps
-#Place to download: https://www.kaggle.com/jessevent/all-crypto-currencies iSinkInWater, brucejamesiverson@gmail.com, I**********
-
-#The below should be updated to be simplified to use parent directory? unsure how that works...
-#https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
-
-paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
-'updated history': 'C:/Python Programs/crypto_trader/historical data/cumulative_data_all_currencies.csv',
-'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-'rewards': 'agent_rewards',
-'models': 'agent_models',
-'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testingBTCUSD.csv'}
-
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -368,8 +358,8 @@ if __name__ == '__main__':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
 
-        start = datetime.now() - timedelta(days = 10)
-        end = datetime.now()
+        end = datetime(2020, 4, 17)
+        start = end - timedelta(days = 9)
 
         # start = datetime(2018, 3, 1)
         # end = datetime(2018, 4, 1)
