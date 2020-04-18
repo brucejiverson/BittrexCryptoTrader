@@ -74,7 +74,7 @@ class ExchangeEnvironment:
         self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators #+ self.n_asset #price and volume, and then the indicators, then last state
         self.action_list[0] #The action where nothing is owned
 
-        self.assets_owned = None
+        self.assets_owned = [0]*self.n_asset
         self.asset_prices = [0]*self.n_asset
 
         self.USD = None
@@ -83,8 +83,10 @@ class ExchangeEnvironment:
 
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
-        log_columns = ['Value']
+        log_columns = ['Total Value', 'BTC']
         self.log = pd.DataFrame(columns=log_columns)
+
+
 
 
     def _process_candle_dict(self, candle_dictionary, market):
@@ -482,7 +484,8 @@ class ExchangeEnvironment:
         sharpe = my_roi/self.log.Value.std()
         print(f'Sharpe Ratio: {sharpe}') #one or better is good
 
-        self.log.plot(y='Value', ax=ax2)
+        self.log.plot(y='Total Value', ax=ax2)
+        self.log.plot(y='BTC', ax = ax2)
         fig.autofmt_xdate()
 
 
@@ -598,10 +601,11 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         # store the current value of the portfolio here
         cur_val = self._get_val()
+        btc_amt = self._get_btc()*self.asset_prices[0]
 
         if self.should_log:
             self.log = self.log.append(pd.DataFrame.from_records(
-                [dict(zip(self.log.columns, [cur_val]))]), ignore_index=True)
+                [dict(zip(self.log.columns, [cur_val, btc_amt]))]), ignore_index=True)
 
         def log_ROI(initial, final):
             """ Returns the log rate of return, which accounts for how percent changes "stack" over time
@@ -622,6 +626,9 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
     def _get_val(self):
         return self.assets_owned.dot(self.asset_prices) + self.USD
+
+    def _get_btc(self):
+        return self.assets_owned[0]
 
 
     def _get_state(self):
