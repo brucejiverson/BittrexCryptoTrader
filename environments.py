@@ -24,7 +24,8 @@ paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bit
 'secret': "/Users/biver/Documents/crypto_data/secrets.json",
 'rewards': 'agent_rewards',
 'models': 'agent_models',
-'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testingBTCUSD.csv'}
+'order log': 'C:/Python Programs/crypto_trader/order logs/order_log',
+'test trade log':  'C:/Python Programs/crypto_trader/order logs/trade_testingBTCUSD.csv'}
 
 
 def ROI(initial, final):
@@ -102,7 +103,7 @@ class ExchangeEnvironment:
         return df
 
 
-    def fetch_data(self, start_date, end_date):
+    def _fetch_data(self, start_date, end_date):
         """This function pulls data from the exchange, the cumulative repository, and the data download in that order
         depending on the input date range."""
 
@@ -224,7 +225,7 @@ class ExchangeEnvironment:
         return formatted_df.dropna()
 
 
-    def prepare_data(self):
+    def _prepare_data(self):
         """This method takes the raw candle data and constructs features, changes granularity, etc."""
 
         print("ORIGINAL DATA: ")
@@ -256,7 +257,7 @@ class ExchangeEnvironment:
         #
         # transformed_df.drop(transformed_df.index[0], inplace = True)
 
-        # self.augmented_dicky_fuller()
+        # self._augmented_dicky_fuller()
 
         #this assumes that the stationary method used on the df is the same used in _get_state()
         print("DATA TO RUN ON: ")
@@ -442,7 +443,7 @@ class ExchangeEnvironment:
         print('Data written.')
 
 
-    def augmented_dicky_fuller(self):
+    def _augmented_dicky_fuller(self):
         """This method performs an ADF test on the transformed df. Code is borrowed from
          https://www.analyticsvidhya.com/blog/2018/09/non-stationary-time-series-python/
          Quote: If the test statistic is less than the critical value, we can reject the null
@@ -539,15 +540,15 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         in time can be captured by indexing that snapshot."""
         self.asset_data = None
 
-        self.fetch_data(start, end)
-        self.prepare_data()
+        self._fetch_data(start, end)
+        self._prepare_data()
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, n_features = self.asset_data.shape
 
         # instance attributes
         self.initial_investment = initial_investment
         self.cur_step = None
-        self.mean_spread = .0001 #Fraction of asset value typical for the spread
+        self.mean_spread = .0005 #Fraction of asset value typical for the spread
 
         self.reset()
 
@@ -751,8 +752,8 @@ class BittrexExchange(ExchangeEnvironment):
         # Resets the environement to the initial state
         end = datetime.now()
         start = end - timedelta(days = 1)
-        self.fetch_data(start, end)
-        self.prepare_data()
+        self._fetch_data(start, end)
+        self._prepare_data()
 
         self.cancel_all_orders()
         self.get_current_prices()
@@ -764,7 +765,7 @@ class BittrexExchange(ExchangeEnvironment):
         #     while not success:
         #         success = self._trade(-self.assets_owned[0])
 
-        return self._get_state(), self._return_val() # Return the state vector (same as obervation for now)
+        return self._get_state(), self._return_val()
 
 
     def _get_state(self):
@@ -966,8 +967,10 @@ class BittrexExchange(ExchangeEnvironment):
                 dt = datetime.now() - start_time  # note that this includes the time to run a small amount of code
 
                 order_data['result']['Order Duration'] = dt
-                trade = _process_order_data(order_data)
-                # print(trade)
+                trade_df = _process_order_data(order_data)
+            #this save the information regardless of if the trade was successful or not
+            print(trade_df)
+            self._save_order_data(trade_df)
 
     def _monitor_order_status(self, uuid, time_limit = 30):
         """This method loops for a maximum duration of timelimit seconds, checking the status of the open order uuid that is passed.
@@ -1024,6 +1027,10 @@ class BittrexExchange(ExchangeEnvironment):
         order_df.Opened = pd.to_datetime(order_df.Opened, format="%Y-%m-%dT%H:%M:%S")
 
         return order_df
+
+
+    def _save_order_data(self, df):
+        """This method appends order data to the order log csv for record keeping and later analysis."""
 
 
     def get_all_order_history(self):
