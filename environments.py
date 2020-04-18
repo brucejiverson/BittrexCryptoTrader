@@ -480,8 +480,8 @@ class ExchangeEnvironment:
             fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
             self.df.plot( y=token +'Close', ax=ax1)
 
-        my_roi = ROI(self.log.Value.iloc[0], self.log.Value.iloc[-1])
-        sharpe = my_roi/self.log.Value.std()
+        my_roi = ROI(self.log['Total Value'].iloc[0], self.log['Total Value'].iloc[-1])
+        sharpe = my_roi/self.log['Total Value'].std()
         print(f'Sharpe Ratio: {sharpe}') #one or better is good
 
         self.log.plot(y='Total Value', ax=ax2)
@@ -626,6 +626,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
     def _get_val(self):
         return self.assets_owned.dot(self.asset_prices) + self.USD
+
 
     def _get_btc(self):
         return self.assets_owned[0]
