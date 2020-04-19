@@ -780,10 +780,10 @@ class BittrexExchange(ExchangeEnvironment):
           ult_row = slice_df.tail(1)                            #last row in slice_df an array
 
           for i, a in enumerate(self.markets):
-              ult_row[0+2*i] - penult_row[0+2*i]                # correcting each market's close to be a delta rather than its value
-              ult_row[1+2*i] - penult_row[1+2*i]                # correcting each market's volume to be a delta
+              ult_row[0+2*i] -= penult_row[0+2*i]                # correcting each market's close to be a delta rather than its value
+              ult_row[1+2*i] -= penult_row[1+2*i]                # correcting each market's volume to be a delta
 
-          state = ult_row
+          state = ult_row.values
 
           return state
 
