@@ -40,11 +40,16 @@ from sklearn.preprocessing import StandardScaler
 
 """Whats sean working on?
 -play one episode should be a part of sim env?
+
 -Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
+
 -enable data scraping to handle multiple currencies -- see dataframe.join method or maybe merge
 
 -Better feature engineering (more features, different features, more, less, DERIVATIVES OF FEATURES OF MULTIPLE ORDERS)
     -read up on technical analysis, 'indicators'
+
+-look up hedge fund stucturing
+
 -incorporate features into the environment classes (we want features to auto update when running in real time)
 """
 

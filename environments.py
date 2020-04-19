@@ -685,8 +685,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
 
         # get current value before performing the action
-        prev_price = self.asset_prices[0]
-
         action_vec = self.action_list[action]
 
         cur_price = self.asset_prices[0]
@@ -700,22 +698,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
 
-
-            #currently set up for only bitcoin
-            """for i, a in enumerate(action_vec): #for each asset
-                fractional_change_needed = a - (1 - self.USD/cur_val) #desired fraction of portfolio to have in asset - fraction held
-
-                if abs(fractional_change_needed) > .05: #Porfolio granulatiryt will change with asset price movement. This sets a threshhold for updating position
-                    # print("Frac change: " + str(fractional_change_needed))
-
-                    trade_amount = fractional_change_needed*cur_val #in USD
-                    # print("Trade amount: " + str(trade_amount))
-                    if trade_amount > 0:    #buy
-                        self.assets_owned[0] += trade_amount/bid_price
-                    else:   #sell
-                        self.assets_owned[0] += trade_amount/ask_price
-
-                    self.USD -= trade_amount"""
 
             #Below this is the old way
              # Sell everything
@@ -789,6 +771,8 @@ class BittrexExchange(ExchangeEnvironment):
 
 
     def _act(self, action):
+
+        '''
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
 
@@ -799,6 +783,40 @@ class BittrexExchange(ExchangeEnvironment):
             #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
             #Calculate the changes needed for each asset
             delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
+            '''
+            #currently set up for only bitcoin
+        # index the action we want to perform
+        # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
+
+        # get current value before performing the action
+        action_vec = self.action_list[action]
+
+        cur_price = self.asset_prices[0]
+        bid_price = cur_price*(1 - self.mean_spread/2)
+        ask_price = cur_price*(1 + self.mean_spread/2)
+
+        cur_val = self._get_val()
+
+
+        if action_vec != self.last_action:  # if attmepting to change state
+            #Calculate the changes needed for each asset
+            # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
+
+        for i, a in enumerate(action_vec): #for each asset
+
+            fractional_change_needed = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
+
+            if abs(fractional_change_needed) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
+                # print("Frac change: " + str(fractional_change_needed))
+
+                trade_amount = fractional_change_needed*cur_val #in USD
+                # print("Trade amount: " + str(trade_amount))
+                if trade_amount > 0:    #buy
+                    self.assets_owned[0] += trade_amount/bid_price
+                else:   #sell
+                    self.assets_owned[0] += trade_amount/ask_price
+
+                self.USD -= trade_amount
 
 
     def _return_val(self):

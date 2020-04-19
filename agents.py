@@ -160,14 +160,6 @@ class SimpleAgent():
             return 0
 
 
-        if np.random.rand() <= self.epsilon:
-            return np.random.choice(self.action_size)
-        act_values = self.model.predict(state)  # Greedy case
-
-        # Take argmax over model predictions to get action with max. Q value.
-        # Output of model is batch sized by num of outputs to index by 0
-        return np.argmax(act_values[0])  # returns action (same)
-
 
 class BenchMarker:
     """For now, this just uses the Renko strategy. Eventually,
