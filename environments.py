@@ -493,7 +493,7 @@ class ExchangeEnvironment:
         print(f'Sharpe Ratio: {sharpe}') #one or better is good
 
         self.log.plot(y='Total Value', ax=ax2)
-        self.log.plot(y='BTC', ax = ax2)
+        self.log.plot(y='BTC', ax = ax2)            # !!! not formatted to work with multiple coins
         fig.autofmt_xdate()
 
 
@@ -773,9 +773,8 @@ class BittrexExchange(ExchangeEnvironment):
 
           slice_df = self.df.tail(2)                            #snapshot of df with last 2 rows
 
-          for i, a in enumerate(self.markets):                  #relies on formatting open, high, los, close, volume in order
-              cols = [0+5*i,2+5*i]                              #cycles through cols 0 to 2, 5 to 7, 10 to 12, etc depending on how many markets
-              slice_df.drop(self_df.columns[cols], axis =1)     #only keeping close, volume
+          cols = [c for c in slice_df.columns if c.lower()[3:] != 'open', 'high', 'low']
+          slice_df = slice_df[cols]
 
           penult_row = slice_df.head(1)                         #making first row in slice_df an array
           ult_row = slice_df.tail(1)                            #last row in slice_df an array
