@@ -22,10 +22,9 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
--fix save_data
 -why are all agents giving inconsistent test results?
--somewhere data granularity is getting fucked
 -mirror the datastructure of the sim env in the real env
+-reformat the stationarity testing
 -trade logging (API will not return all trade history, limited by time).
 -Functional, automated trading
     -get data handling integrated
@@ -192,6 +191,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
             agent.load(f'{models_folder}/linear.npz')
 
     time_remaining = timedelta(hours=0)
+    #Print out some info about the assets
     for market in sim_env.markets:
         token = market[4:7]
         market_roi = return_on_investment(sim_env.df[token + 'Close'].iloc[-1], sim_env.df[token + 'Close'].iloc[0])
@@ -202,16 +202,13 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
 
         t0 = datetime.now()
 
+        #If you're playing the last episode, create a log
         if e == num_episodes - 1:
             sim_env.should_log = True
         else: #In case for some reason we record a log and then switch back
             sim_env.should_log = False
 
         val = play_one_episode(agent, sim_env, my_scaler, mode)
-
-        if e == num_episodes - 1:
-            sim_env.plot_market_data()
-            sim_env.plot_agent_history()
 
         roi = return_on_investment(val, initial_investment)  # Transform to ROI
         dt = datetime.now() - t0
@@ -225,6 +222,8 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
         print(f"time remaining: {time_remaining + timedelta(seconds = 3)}")
         portfolio_value.append(val)  # append episode end portfolio value
 
+    sim_env.plot_market_data()
+    sim_env.plot_agent_history()
     # save the weights when we are done
     if mode in ['train']:
         # save the DQN
@@ -363,7 +362,7 @@ if __name__ == '__main__':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
 
-        end = datetime(2020, 4, 17)
+        end = datetime(2020, 4, 18)
         start = end - timedelta(days = 9)
 
         # start = datetime(2018, 3, 1)

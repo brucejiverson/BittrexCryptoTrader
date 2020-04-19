@@ -184,7 +184,6 @@ class BenchMarker:
             return 0
 
 
-
 class BuyAndHold(object):
     """ Responsible for taking actions, learning from them, and taking actions
     such that they will maximize future rewards
