@@ -820,7 +820,7 @@ class BittrexExchange(ExchangeEnvironment):
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
 
-            for i, a in enumerate(action_vec): #for each asset
+            for i, a in enumerate(action_vec): #for selling assets (must happen first)
 
                 """
                 4/18 - This is currently structured to work with a simple USD-BTC pairing only. Eventually, this will need to have the following logic:
@@ -846,31 +846,22 @@ class BittrexExchange(ExchangeEnvironment):
 
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
-                elif decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
+            for i, a in enumerate(action_vec): #for buying assets
+
+
+                current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
+                currency_pair = self.markets[i]                         #which currency pair is being evaluated
+                decimal_diff = a - current_holding                      #want minus have
+                threshhold = 0.05                                       #trades only executed if difference between want and have is sufficiently high enough
+
+
+                if decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
 
                     print("Oh boy, time to spend " + str(round(decimal_diff*100,2)) + "% more of my portfolio on " + str(currency_pair[4:]))
 
                     trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
 
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
-
-
-
-            """
-            fractional_change = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
-
-            if abs(fractional_change) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
-                # print("Frac change: " + str(fractional_change_needed))
-
-                trade_amount = fractional_change*cur_val #in USD
-                # print("Trade amount: " + str(trade_amount))
-                if trade_amount > 0:    #buy
-                    self.assets_owned[0] += trade_amount/bid_price
-                else:   #sell
-                    self.assets_owned[0] += trade_amount/ask_price
-
-                self.USD -= trade_amount
-            """
 
 
     def _get_val(self):
