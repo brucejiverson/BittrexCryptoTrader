@@ -24,14 +24,13 @@ from sklearn.preprocessing import StandardScaler
 """Whats Bruce working on?
 -why are all agents giving inconsistent test results?
 -mirror the datastructure of the sim env in the real env
--trade logging (API will not return all trade history, limited by time).
 -MAKE SURE THAT ohl IS GETTING stripped at the appropriate time/way so it doesnt affect
 -Functional, automated trading
+    -update the df, also with features
     -agent logging
     -get data handling integrated
-    -make get state work
-    -make act work
-    -make a 'live' method, I figure it should go for a day
+    -test get state work
+    -make a 'live' function, I figure it should go for a day
 
 
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
@@ -55,6 +54,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 """OTHER FEATURES
+-make granularity work with live
 -make state reflect the percentage change instead of amount of change in price
 -understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 -make _add_features also update the self.n_features
@@ -246,101 +246,22 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
     plt.show()
 
 
-def run_agents_live(mode, path_dict, start_date, end_date, num_episodes, symbols=['BTCUSD']):
+def run_agents_live(mode, start_date, end_date):
     assert(mode == 'run')
 
     #Prepare the agent
-    # load the previous scaler
-    with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-        scaler = pickle.load(f)
 
     # make sure epsilon is not 1!
     # Set to 0 for purely deterministic
-    agent.epsilon = agent.epsilon_min
+    if agent.name == 'dqn':
+        agent.epsilon = 0
+        # load the previous scaler
+        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+            scaler = pickle.load(f)
 
-    # Price in USD, price per unit is $/BTC
+        # load trained weights
+        agent.load(f'{models_folder}/linear.npz')
 
-    is_USD = True
-
-    log = pd.DataFrame()
-
-    # Note that bittrex exchange is based in GMT 8 hours ahead of CA
-    trade_incomplete = True
-
-    # Enter a trade into the market.
-    # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
-    ticker = self.bittrex_obj_1_1.get_ticker(market)
-    price = ticker['result']['Last']
-    amount = amount / price  # Convert to the amount of BTC
-
-    if is_USD:  # buy
-        trade_result = self.bittrex_obj_1_1.buy_limit(market, amount, round(price*1.0001, 3))
-        side = 'buying'
-    else:       # Sell
-        trade_result = my_bittrex1_1.sell_limit(market, amount, round(price*0.9999, 3) )
-        side = 'selling'
-
-    # Check that an order was entered
-    if not trade_result['success']:
-        print('Trade attempt failed')
-        print(trade_result['message'])
-        #Start again?
-
-    print(f'Order for {side} {amount:.8f} {symbols[0:3]} at a price of {price:.3f} has been submitted to the market.')
-    order_uuid = trade_result['result']['uuid']
-
-    # Loop to see if the order has been filled
-    status = trade_is_executed(order_uuid, order_data, my_bittrex)
-
-    if status == True:
-        is_USD = not is_USD
-        print(f'Order has been filled. Id: {order_uuid}.')
-
-
-    print(f'Attempt was not filled. Attempting to order again.')
-
-    dt = datetime.now() - start_time  # note that this include the time to run a small amount of code
-
-    try: #Some weird error here that I have not been able to recreate. Added print statements for debugging if it occurs again
-        order_data['result']['Order Duration'] = dt.total_seconds()
-    except TypeError:
-        print(dt)
-        print(dt.total_seconds())
-    trade = process_order_data(order_data)
-    log = log.append(trade, ignore_index=True)
-    # log.reset_index(inplace=True)
-
-    # load trained weights
-    agent.load(f'{models_folder}/linear.npz')
-
-    # Loop to play one episode
-    t0 = datetime.now()
-
-    while True:
-        # Fetch new data
-        candle_dict = my_bittrex1_1.get_candles('USD-BTC', 'minute')
-        if candle_dict['success']:
-            new_df = process_candle_dict(candle_dict)
-        else:
-            print("Failed to get candle data")
-            continue
-
-        df = df.append(new_df)
-        df = df.drop_duplicates(['Date'])
-        df.sort_values(axis = 'index', inplace=True)
-        df.reset_index(inplace=True, drop=True)
-
-        if first_check:
-            market_start = price
-            first_check = False
-
-        # This allows for accessing by index
-        # df.reset_index(inplace=True, drop=True) necessary for plotting
-
-        return_on_investment = return_on_investment(account_value, 100)
-        print('Account Return: ', return_on_investment, ' %')
-        market_performance = return_on_investment(price, market_start)
-        print('Market Performance: ', market_performance, ' %')
 
 if __name__ == '__main__':
 
