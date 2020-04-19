@@ -428,8 +428,8 @@ class ExchangeEnvironment:
         print('Fetched.')
         df_to_save = self.df.append(orig_df, sort = True)
 
+        #Drop features and indicators, all non savable data
         for col in df_to_save.columns:
-
             if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
                 df_to_save.drop(col, axis = 1, inplace = True)
 
@@ -750,7 +750,7 @@ class BittrexExchange(ExchangeEnvironment):
 
         # #Put all money into USD
         # if self.assets_owned[0] > 0:
-        #     sucess = False
+        #     success = False
         #     while not success:
         #         success = self._trade(-self.assets_owned[0])
 
@@ -803,21 +803,21 @@ class BittrexExchange(ExchangeEnvironment):
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
 
-        for i, a in enumerate(action_vec): #for each asset
+            for i, a in enumerate(action_vec): #for each asset
 
-            fractional_change_needed = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
+                fractional_change_needed = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
 
-            if abs(fractional_change_needed) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
-                # print("Frac change: " + str(fractional_change_needed))
+                if abs(fractional_change_needed) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
+                    # print("Frac change: " + str(fractional_change_needed))
 
-                trade_amount = fractional_change_needed*cur_val #in USD
-                # print("Trade amount: " + str(trade_amount))
-                if trade_amount > 0:    #buy
-                    self.assets_owned[0] += trade_amount/bid_price
-                else:   #sell
-                    self.assets_owned[0] += trade_amount/ask_price
+                    trade_amount = fractional_change_needed*cur_val #in USD
+                    # print("Trade amount: " + str(trade_amount))
+                    if trade_amount > 0:    #buy
+                        self.assets_owned[0] += trade_amount/bid_price
+                    else:   #sell
+                        self.assets_owned[0] += trade_amount/ask_price
 
-                self.USD -= trade_amount
+                    self.USD -= trade_amount
 
 
     def _return_val(self):
@@ -857,7 +857,7 @@ class BittrexExchange(ExchangeEnvironment):
                         print('Retrying...')
                 else: #success
                     # print(ticker['result'])
-                    print('Sucess.')
+                    print('success.')
                     self.asset_prices[i] = ticker['result']['Last']
                     break
 
@@ -979,15 +979,14 @@ class BittrexExchange(ExchangeEnvironment):
             # Loop for a time to see if the order has been filled
             order_is_filled = self._monitor_order_status(uuid) #True if order is filled
 
-            #this saves the information regardless of if the trade was successful or not
-            self._get_and_save_order_data(uuid)
 
             if order_is_filled == True:
                 print(f'Order has been filled. uuid: {uuid}.')
-                return True
-            else:
-                # print('Order not filled')
-                return False
+
+            #this saves the information regardless of if the trade was successful or not
+            self._get_and_save_order_data(uuid)
+
+            return order_is_filled
 
 
     def _monitor_order_status(self, uuid, time_limit = 30):
@@ -1029,11 +1028,14 @@ class BittrexExchange(ExchangeEnvironment):
         """This method fetches information on a specific order from the exchange.
         # Example dictionary from Bittrex API is:
         {'success': True, 'message': '', 'result': {'AccountId': None, 'OrderUuid': '3d87588d-70d6-4b40-a723-11248aaaff8b', 'Exchange': 'USD-BTC',
-         'Type': 'LIMIT_SELL', 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Limit': 1.3, 'Reserved': None, 'ReserveRemaining': None,
-         'CommissionReserved': None, 'CommissionReserveRemaining': None, 'CommissionPaid': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722,
-         'Opened': '2019-11-19T07:42:48.85', 'Closed': '2019-11-19T07:42:48.85', 'IsOpen': False, 'Sentinel': None, 'CancelInitiated': False,
-         'ImmediateOrCancel': False, 'IsConditional': False, 'Condition': 'NONE', 'ConditionTarget': 0.0}}"""
+        'Type': 'LIMIT_SELL', 'Quantity': 0.00123173, 'QuantityRemaining': 0.0, 'Limit': 1.3, 'Reserved': None, 'ReserveRemaining': None,
+        'CommissionReserved': None, 'CommissionReserveRemaining': None, 'CommissionPaid': 0.02498345, 'Price': 9.99338392, 'PricePerUnit': 8113.29099722,
+        'Opened': '2019-11-19T07:42:48.85', 'Closed': '2019-11-19T07:42:48.85', 'IsOpen': False, 'Sentinel': None, 'CancelInitiated': False,
+        'ImmediateOrCancel': False, 'IsConditional': False, 'Condition': 'NONE', 'ConditionTarget': 0.0}}"""
 
+
+        print('Saving order data...', end = ' ')
+        date_format = "%Y-%m-%dT%H:%M:%S"
         dict = self.bittrex_obj_1_1.get_order(uuid)
 
         # in order to construct a df, the values of the dict cannot be scalars, must be lists, so convert to lists
@@ -1043,18 +1045,29 @@ class BittrexExchange(ExchangeEnvironment):
         order_df = pd.DataFrame(results)
 
         order_df.drop(columns=['AccountId', 'Reserved', 'ReserveRemaining', 'CommissionReserved', 'CommissionReserveRemaining',
-                                'Sentinel', 'IsConditional', 'Condition', 'ConditionTarget', 'ImmediateOrCancel', 'CancelInitiated'], inplace=True)
+                                'Sentinel', 'IsConditional', 'Condition', 'ConditionTarget', 'ImmediateOrCancel', 'CancelInitiated',
+                                'ImmediateOrCancel', 'IsConditional', 'Condition', 'ConditionTarget'], inplace=True)
 
-        order_df.reset_index(inplace=True, drop=True)
+        # date strings into datetimes
+        order_df.Closed = pd.to_datetime(order_df.Closed, format=date_format)
+        order_df.Opened = pd.to_datetime(order_df.Opened, format=date_format)
+        order_df.set_index('Opened', inplace = True, drop = True)
 
-        #Load the trade log
-        order_log = pd.
-        # dates into datetimes
+        print('ORDER INFO:')
+        print(order_df)
 
-        order_df.Closed = pd.to_datetime(order_df.Closed, format="%Y-%m-%dT%H:%M:%S")
-        order_df.Opened = pd.to_datetime(order_df.Opened, format="%Y-%m-%dT%H:%M:%S")
+        # #Load the trade log from csv
+        # #Note that the dateformat for this is different than for the price history.
+        # #The format is the same in csv as the bittrex API returns for order data
+        # def dateparse(x): return pd.datetime.strptime(x, date_format)
+        # df = pd.read_csv(paths['order log'], parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
+        # df.set_index('Opened', inplace = True, drop = True)
+        # df = df.append(order_df, sort = False)
 
-        # return order_df
+
+        # Format and save the df
+        df.sort_index(inplace = True)
+        df.to_csv(path, index = True, index_label = 'Opened', date_format = date_format)
 
     def _get_and_save_order_history(self):
         """This method retrieves trade history for all currency pairs from the exchange, creates a dataframe with the orders,
