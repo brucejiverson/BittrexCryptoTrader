@@ -1,11 +1,11 @@
-from main import *
+
 from environments import *
 import pandas as pd
 from datetime import datetime, timedelta
 import json
 
-env = BittrexExchange(paths, money_to_use = 5)
-# env._trade('USD-BTC', 5)
+env = BittrexExchange(money_to_use = 5)
+# env._trade('BTC-ETH', -5)
 # env.get_account_health()
 
 # num_trades = 5
