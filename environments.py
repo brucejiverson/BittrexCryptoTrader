@@ -762,12 +762,13 @@ class BittrexExchange(ExchangeEnvironment):
         # Note that the state could be a transformation of the observation, or
         # multiple past observations stacked.)
         state = np.empty(self.state_dim)  #assets_owned, USD
-        # self.cur_state[0:self.n_asset] = self.asset_prices
-        state[0:self.n_asset] = self.asset_prices
-        state[0:self.n_asset] = self.assets_owned   #This is set in trade
-        state[self.n_asset] = self.USD     #This is set in trade
-        # Asset data is amount btc price, usd, volume, indicators
-        # state[self.n_asset+1:(self.n_asset*2 + 2 + self.n_indicators*self.n_asset)] =  self.asset_data[self.cur_step]   #Taken from data
+
+        slice_df = self.df.tail(2)
+
+        slice = slice_df
+
+
+
         return state
 
 
@@ -839,7 +840,7 @@ class BittrexExchange(ExchangeEnvironment):
 
 
 
-"""
+                    """
             fractional_change = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
 
             if abs(fractional_change) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
