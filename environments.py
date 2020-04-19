@@ -758,18 +758,27 @@ class BittrexExchange(ExchangeEnvironment):
 
 
     def _get_state(self):
-        # Returns the state (for now state, and observation are the same.
-        # Note that the state could be a transformation of the observation, or
-        # multiple past observations stacked.)
-        state = np.empty(self.state_dim)  #assets_owned, USD
+          # Returns the state (for now state, and observation are the same.
+          # Note that the state could be a transformation of the observation, or
+          # multiple past observations stacked.)
+          state = np.empty(self.state_dim)  #assets_owned, USD
 
-        slice_df = self.df.tail(2)
+          slice_df = self.df.tail(2)                            #snapshot of df with last 2 rows
 
-        slice = slice_df
+          for i, a in enumerate(self.markets):                  #relies on formatting open, high, los, close, volume in order
+              cols = [0+5*i,2+5*i]                              #cycles through cols 0 to 2, 5 to 7, 10 to 12, etc depending on how many markets
+              slice_df.drop(self_df.columns[cols], axis =1)     #only keeping close, volume
 
+          penult_row = slice_df.head(1)                         #making first row in slice_df an array
+          ult_row = slice_df.tail(1)                            #last row in slice_df an array
 
+          for i, a in enumerate(self.markets):
+              ult_row[0+2*i] - penult_row[0+2*i]                # correcting each market's close to be a delta rather than its value
+              ult_row[1+2*i] - penult_row[1+2*i]                # correcting each market's volume to be a delta
 
-        return state
+          state = ult_row
+
+          return state
 
 
     def _act(self, action):
@@ -952,7 +961,7 @@ class BittrexExchange(ExchangeEnvironment):
         df = pd.Series(info, index = labels)
 
         print(df)
-        
+
     def cancel_all_orders(self):
         """This method looks for any open orders associated with the account,
         and cancels those orders. VALIDATED"""
