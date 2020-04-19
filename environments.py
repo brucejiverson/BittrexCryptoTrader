@@ -805,37 +805,37 @@ class BittrexExchange(ExchangeEnvironment):
 
             for i, a in enumerate(action_vec): #for each asset
 
-        """
-        4/18 - This is currently structured to work with a simple USD-BTC pairing only. Eventually, this will need to have the following logic:
+            """
+            4/18 - This is currently structured to work with a simple USD-BTC pairing only. Eventually, this will need to have the following logic:
 
-        -cycle through every element in action_vec and see if you need to sell any of that coin
-            -execute all sells as they come up to stock up on usd
-        -cycle through every element in action_vec and see if you need to buy any of that coin
-            -<should probably find a way to write this such that it only cycles through the elements where selling did not occur for efficiency>
-            -execute all buys
-        """
+            -cycle through every element in action_vec and see if you need to sell any of that coin
+                -execute all sells as they come up to stock up on usd
+            -cycle through every element in action_vec and see if you need to buy any of that coin
+                -<should probably find a way to write this such that it only cycles through the elements where selling did not occur for efficiency>
+                -execute all buys
+            """
 
-            current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
-            currency_pair = self.markets[i]                         #which currency pair is being evaluated
-            decimal_diff = current_holding - a                      #if positive and beyond threshhold -> sell       if negative and beyond threshhold -> buy
-            threshhold = 0.05                                       #trades only executed if difference between have and want is sufficiently high enough
+                current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
+                currency_pair = self.markets[i]                         #which currency pair is being evaluated
+                decimal_diff = current_holding - a                      #if positive and beyond threshhold -> sell       if negative and beyond threshhold -> buy
+                threshhold = 0.05                                       #trades only executed if difference between have and want is sufficiently high enough
 
 
-            if decimal_diff > threshhold:
+                if decimal_diff > threshhold:
 
-                print("Aw jeez, I've got " + str(decimal_diff*100) + "% too much of my portfolio in " + str(currency_pair[4:]))
+                    print("Aw jeez, I've got " + str(decimal_diff*100) + "% too much of my portfolio in " + str(currency_pair[4:]))
 
-                trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD
+                    trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD
 
-                self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
+                    self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
-            elif -decimal_diff > threshhold:
+                elif -decimal_diff > threshhold:
 
-                print("Oh boy, time to spend " + str(decimal_diff*100) + "% more of my portfolio on " + str(currency_pair[4:]))
+                    print("Oh boy, time to spend " + str(decimal_diff*100) + "% more of my portfolio on " + str(currency_pair[4:]))
 
-                trade_amount = -decimal_diff * cur_val              #amount to sell of coin in USD
+                    trade_amount = -decimal_diff * cur_val              #amount to sell of coin in USD
 
-                self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
+                    self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
 
 
