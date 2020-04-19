@@ -839,7 +839,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                 if -decimal_diff > threshhold:                          #sell if decimal_diff is sufficiently negative
 
-                    print("Aw jeez, I've got " + str(decimal_diff*100) + "% too much of my portfolio in " + str(currency_pair[4:]))
+                    print("Aw jeez, I've got " + str(round(decimal_diff*100,2)) + "% too much of my portfolio in " + str(currency_pair[4:]))
 
                     trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD, formatted to be neg for _trade logic
 
@@ -847,7 +847,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                 elif decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
 
-                    print("Oh boy, time to spend " + str(decimal_diff*100) + "% more of my portfolio on " + str(currency_pair[4:]))
+                    print("Oh boy, time to spend " + str(round(decimal_diff*100,2)) + "% more of my portfolio on " + str(currency_pair[4:]))
 
                     trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
 
