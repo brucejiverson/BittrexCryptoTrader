@@ -817,23 +817,23 @@ class BittrexExchange(ExchangeEnvironment):
 
                 current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
                 currency_pair = self.markets[i]                         #which currency pair is being evaluated
-                decimal_diff = current_holding - a                      #if positive and beyond threshhold -> sell       if negative and beyond threshhold -> buy
-                threshhold = 0.05                                       #trades only executed if difference between have and want is sufficiently high enough
+                decimal_diff = a - current_holding                      #want minus have
+                threshhold = 0.05                                       #trades only executed if difference between want and have is sufficiently high enough
 
 
-                if decimal_diff > threshhold:
+                if -decimal_diff > threshhold:                          #sell if decimal_diff is sufficiently negative
 
                     print("Aw jeez, I've got " + str(decimal_diff*100) + "% too much of my portfolio in " + str(currency_pair[4:]))
 
-                    trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD
+                    trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD, formatted to be neg for _trade logic
 
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
-                elif -decimal_diff > threshhold:
+                elif decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
 
                     print("Oh boy, time to spend " + str(decimal_diff*100) + "% more of my portfolio on " + str(currency_pair[4:]))
 
-                    trade_amount = -decimal_diff * cur_val              #amount to sell of coin in USD
+                    trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
 
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
@@ -995,22 +995,23 @@ class BittrexExchange(ExchangeEnvironment):
         if amount > 0:  # buy
             rate = round(self.asset_prices[0]*(1 + spread/2), 3)
             amount_currency = round(amount/rate, 4)
-            order_entry_satus = self.bittrex_obj_1_1.buy_limit(self.markets[0], amount_currency, rate)
+            coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
+            order_entry_status = self.bittrex_obj_1_1.buy_limit(currency_pair, amount_currency, rate)
             side = 'buying'
         else:       # Sell
             rate = round(self.asset_prices[0]*(1 - spread/2), 3)
             amount_currency = round(-amount/rate, 4)
-            order_entry_satus = self.bittrex_obj_1_1.sell_limit(self.markets[0], amount_currency, rate)
+            order_entry_status = self.bittrex_obj_1_1.sell_limit(currency_pair, amount_currency, rate)
             side = 'selling'
 
         # Check that an order was entered
-        if not order_entry_satus['success']:
+        if not order_entry_status['success']:
             print('Trade attempt failed: ', end = ' ')
-            print(order_entry_satus['message'])
+            print(order_entry_status['message'])
             return False
         else: #order has been successfully entered to the exchange
-            print(f'Order for {side} {amount_currency:.8f} {self.markets[0][4:7]} at a price of ${rate:.2f} has been submitted to the market.')
-            uuid = order_entry_satus['result']['uuid']
+            print(f'Order for {side} {amount_currency:.8f} {currency_pair[4:]} at a price of ${rate:.2f} has been submitted to the market.')
+            uuid = order_entry_status['result']['uuid']
 
             # Loop for a time to see if the order has been filled
             order_is_filled = self._monitor_order_status(uuid) #True if order is filled
@@ -1018,6 +1019,8 @@ class BittrexExchange(ExchangeEnvironment):
 
             if order_is_filled == True:
                 print(f'Order has been filled. uuid: {uuid}.')
+                self.get_all_balances()        #updating with new amount of coin
+                print('You now have ' + str(self.assets_owned[coin_index]) + ' ' + str(currency_pair[4:]))
 
             #this saves the information regardless of if the trade was successful or not
             self._get_and_save_order_data(uuid)
