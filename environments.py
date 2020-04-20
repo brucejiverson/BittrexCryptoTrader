@@ -869,7 +869,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                     print("Oh boy, time to spend " + str(round(decimal_diff*100,2)) + "% more of my portfolio on " + str(currency_pair[4:]))
 
-                    trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
+                    trade_amount = round(decimal_diff * cur_val, 2) - 0.01               #amount to buy of coin in USD, formatted to be pos for _trade logic
 
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
