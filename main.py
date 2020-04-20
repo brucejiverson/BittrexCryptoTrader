@@ -26,7 +26,9 @@ from sklearn.preprocessing import StandardScaler
 -mirror the datastructure of the sim env in the real env
 -reformat the stationarity testing
 -trade logging (API will not return all trade history, limited by time).
+-MAKE SURE THAT ohl IS GETTING stripped at the appropriate time/way so it doesnt affect 
 -Functional, automated trading
+    -agent logging
     -get data handling integrated
     -make get state work
     -make act work
@@ -54,7 +56,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 """OTHER FEATURES
-
+-make state reflect the percentage change instead of amount of change in price
 -understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 -make _add_features also update the self.n_features
 -fix an error in renko

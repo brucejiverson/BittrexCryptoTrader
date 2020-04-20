@@ -10,7 +10,7 @@ import ta
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 
-# HEY brucejamesiverson
+
 #cryptodatadownload has gaps
 #Place to download: kaggle  iSinkInWater, brucejamesiverson@gmail.com, I**********
 #This has data for all currencies, 10 GB, too big for now https://www.kaggle.com/jorijnsmit/binance-full-history
@@ -24,7 +24,7 @@ paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bit
 'secret': "/Users/biver/Documents/crypto_data/secrets.json",
 'rewards': 'agent_rewards',
 'models': 'agent_models',
-'order log': 'C:/Python Programs/crypto_trader/order logs/order_log',
+'order log': 'C:/Python Programs/crypto_trader/order logs/order_log.csv',
 'test trade log':  'C:/Python Programs/crypto_trader/order logs/trade_testingBTCUSD.csv'}
 
 
@@ -49,7 +49,7 @@ class ExchangeEnvironment:
         self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
         self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
 
-        self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
+        self.markets = ['USD-BTC', 'USD-ETH']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
 
         self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
@@ -762,13 +762,12 @@ class BittrexExchange(ExchangeEnvironment):
         # Note that the state could be a transformation of the observation, or
         # multiple past observations stacked.)
         state = np.empty(self.state_dim)  #assets_owned, USD
-
-        slice_df = self.df.tail(2)
-
-        slice = slice_df
-
-
-
+        # self.cur_state[0:self.n_asset] = self.asset_prices
+        state[0:self.n_asset] = self.asset_prices
+        state[0:self.n_asset] = self.assets_owned   #This is set in trade
+        state[self.n_asset] = self.USD     #This is set in trade
+        # Asset data is amount btc price, usd, volume, indicators
+        # state[self.n_asset+1:(self.n_asset*2 + 2 + self.n_indicators*self.n_asset)] =  self.asset_data[self.cur_step]   #Taken from data
         return state
 
 
@@ -806,55 +805,19 @@ class BittrexExchange(ExchangeEnvironment):
 
             for i, a in enumerate(action_vec): #for each asset
 
-            """
-            4/18 - This is currently structured to work with a simple USD-BTC pairing only. Eventually, this will need to have the following logic:
+                fractional_change_needed = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
 
-            -cycle through every element in action_vec and see if you need to sell any of that coin
-                -execute all sells as they come up to stock up on usd
-            -cycle through every element in action_vec and see if you need to buy any of that coin
-                -<should probably find a way to write this such that it only cycles through the elements where selling did not occur for efficiency>
-                -execute all buys
-            """
+                if abs(fractional_change_needed) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
+                    # print("Frac change: " + str(fractional_change_needed))
 
-                current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
-                currency_pair = self.markets[i]                         #which currency pair is being evaluated
-                decimal_diff = a - current_holding                      #want minus have
-                threshhold = 0.05                                       #trades only executed if difference between want and have is sufficiently high enough
+                    trade_amount = fractional_change_needed*cur_val #in USD
+                    # print("Trade amount: " + str(trade_amount))
+                    if trade_amount > 0:    #buy
+                        self.assets_owned[0] += trade_amount/bid_price
+                    else:   #sell
+                        self.assets_owned[0] += trade_amount/ask_price
 
-
-                if -decimal_diff > threshhold:                          #sell if decimal_diff is sufficiently negative
-
-                    print("Aw jeez, I've got " + str(decimal_diff*100) + "% too much of my portfolio in " + str(currency_pair[4:]))
-
-                    trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD, formatted to be neg for _trade logic
-
-                    self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
-
-                elif decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
-
-                    print("Oh boy, time to spend " + str(decimal_diff*100) + "% more of my portfolio on " + str(currency_pair[4:]))
-
-                    trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
-
-                    self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
-
-
-
-                    """
-            fractional_change = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
-
-            if abs(fractional_change) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
-                # print("Frac change: " + str(fractional_change_needed))
-
-                trade_amount = fractional_change*cur_val #in USD
-                # print("Trade amount: " + str(trade_amount))
-                if trade_amount > 0:    #buy
-                    self.assets_owned[0] += trade_amount/bid_price
-                else:   #sell
-                    self.assets_owned[0] += trade_amount/ask_price
-
-                self.USD -= trade_amount
-            """
+                    self.USD -= trade_amount
 
 
     def _return_val(self):
@@ -897,6 +860,39 @@ class BittrexExchange(ExchangeEnvironment):
                     print('success.')
                     self.asset_prices[i] = ticker['result']['Last']
                     break
+
+
+    def get_latest_candle(self, currency_pair):
+        """This method fetches recent candle data on a specific market.
+        currency_pair should be a string, 'USD-BTC' """
+
+        # Fetch candle data from bittrex for each market
+        if end_date > datetime.now() - timedelta(days=9):
+            for i, market in enumerate(self.markets):
+                print('Fetching ' + market + ' historical data from the exchange.')
+                attempts = 0
+                while True:
+                    print('Fetching candles from Bittrex...', end = " ")
+                    candle_dict = self.bittrex_obj_2.get_latest_candle(market, 'oneMin')
+
+                    if candle_dict['success']:
+                        candle_df = self._process_candle_dict(candle_dict, market)
+                        print("Success.")
+                        print(candle_df.head())
+                        break
+                    else: #If there is an error getting the proper data
+                        print("Failed to get candle data. Candle dict: ", end = ' ')
+                        print(candle_dict)
+                        time.sleep(2*attempts)
+                        attempts += 1
+
+                        if attempts == 5:
+                            print('Exceeded maximum number of attempts.')
+                            raise(TypeError)
+                            print('Retrying...')
+                            #The below logic is to handle joinging data from multiple currencies
+
+
 
 
     def get_all_balances(self):
@@ -952,7 +948,13 @@ class BittrexExchange(ExchangeEnvironment):
         df = pd.Series(info, index = labels)
 
         print(df)
-        
+
+
+    def _calculate_indicators(self):
+        """This method calculates all of the indicators defined in the initialization up to the current price point."""
+        pass
+
+
     def cancel_all_orders(self):
         """This method looks for any open orders associated with the account,
         and cancels those orders. VALIDATED"""
@@ -990,23 +992,22 @@ class BittrexExchange(ExchangeEnvironment):
         if amount > 0:  # buy
             rate = round(self.asset_prices[0]*(1 + spread/2), 3)
             amount_currency = round(amount/rate, 4)
-            coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
-            order_entry_status = self.bittrex_obj_1_1.buy_limit(currency_pair, amount_currency, rate)
+            order_entry_satus = self.bittrex_obj_1_1.buy_limit(self.markets[0], amount_currency, rate)
             side = 'buying'
         else:       # Sell
             rate = round(self.asset_prices[0]*(1 - spread/2), 3)
             amount_currency = round(-amount/rate, 4)
-            order_entry_status = self.bittrex_obj_1_1.sell_limit(currency_pair, amount_currency, rate)
+            order_entry_satus = self.bittrex_obj_1_1.sell_limit(self.markets[0], amount_currency, rate)
             side = 'selling'
 
         # Check that an order was entered
-        if not order_entry_status['success']:
+        if not order_entry_satus['success']:
             print('Trade attempt failed: ', end = ' ')
-            print(order_entry_status['message'])
+            print(order_entry_satus['message'])
             return False
         else: #order has been successfully entered to the exchange
-            print(f'Order for {side} {amount_currency:.8f} {currency_pair[4:]} at a price of ${rate:.2f} has been submitted to the market.')
-            uuid = order_entry_status['result']['uuid']
+            print(f'Order for {side} {amount_currency:.8f} {self.markets[0][4:7]} at a price of ${rate:.2f} has been submitted to the market.')
+            uuid = order_entry_satus['result']['uuid']
 
             # Loop for a time to see if the order has been filled
             order_is_filled = self._monitor_order_status(uuid) #True if order is filled
@@ -1014,8 +1015,6 @@ class BittrexExchange(ExchangeEnvironment):
 
             if order_is_filled == True:
                 print(f'Order has been filled. uuid: {uuid}.')
-                self.get_all_balances()        #updating with new amount of coin
-                print('You now have ' + str(self.assets_owned[coin_index]) + ' ' + str(currency_pair[4:]))
 
             #this saves the information regardless of if the trade was successful or not
             self._get_and_save_order_data(uuid)
@@ -1170,3 +1169,9 @@ class BittrexExchange(ExchangeEnvironment):
             print('Order log is empty.')
         print('Data written to test trade log.')
         print(old_df)
+
+
+
+
+
+    # df.to_csv(path, index = True, index_label = 'Opened', date_format = date_format)

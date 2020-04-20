@@ -6,56 +6,10 @@ import json
 
 env = BittrexExchange(money_to_use = 5)
 env._trade('USD-BTC', -5)
-# env.get_account_health()
+env.view_order_data()
+# env.get_and_save_order_history()
 
-# num_trades = 5
-#
-# is_USD = True
-#
-# log = pd.DataFrame()
-#
-# for n in list(range(num_trades)):
-#
-#     # Note that bittrex exchange is based in GMT 8 hours ahead of CA
-#     trade_incomplete = True
-#     # retries = 5
-#     while trade_incomplete:
-#         # if retries <= 0:
-#         #     print('Failed to order 5 times.')
-#         #     break
-#         trade_enter_time = datetime.now()
-#         amount = 5  # in USD
-#         bittrex_market._get_prices()
-#
-#         if is_USD:  # buy
-#             bittrex_market._trade(amount)
-#         else:       # Sell
-#             bittrex_market._trade(amount)
-#
-#         # Loop to see if the order has been filled
-#         status = trade_is_executed(order_uuid, order_data, my_bittrex)
-#
-#         if status == True:
-#             is_USD = not is_USD
-#             print(f'Order has been filled. Id: {order_uuid}.')
-#             break
-#
-#         print(f'Attempt was not filled. Attempting to order again.')
-#
-#         dt = datetime.now() - trade_enter_time  # note that this include the time to run a small amount of code
-#
-#         try: #Some weird error here that I have not been able to recreate. Added print statements for debugging if it occurs again
-#             order_data['result']['Order Duration'] = dt.total_seconds()
-#         except TypeError:
-#             print(dt)
-#             print(dt.total_seconds())
-#         trade = process_order_data(order_data)
-#         log = log.append(trade, ignore_index=True)
-#         # log.reset_index(inplace=True)
-#
-#
-# save_trade_data(log, paths)
-
+#BELOW IS REFERENCE FROM BITREX.BITTREX LIBRARY
 # def cancel(self, uuid):
 #     """
 #     Used to cancel a buy or sell order
