@@ -1038,9 +1038,16 @@ class BittrexExchange(ExchangeEnvironment):
         # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
 
         if amount > 0:  # buy
-            rate = round(self.asset_prices[0]*(1 + self.mean_spread/2), 3)
+            cur_price = self.asset_prices[0]                                     # !!! only for BTC, will need to change [0] to reference currency_pair
+            ask_price = cur_price*(1 + self.mean_spread/2)
+            print('Ask price is ' + str(ask_price) + 'USD per BTC')
+            rate = self.round_up(ask_price), 3)
+            print('Rate is ' + str(rate) + 'USD per BTC')
+
             amount_currency = round(amount/rate, 6)
+            print('I want to buy ' + str(amount_currency) +'BTC')
             most_possible = round(self.USD/rate,6)
+            print('The most I can afford is ' + str(most_possible) + 'BTC')
 
             if amount_currency > most_possible:
                 amount_currency = most_possible
@@ -1244,3 +1251,7 @@ class BittrexExchange(ExchangeEnvironment):
             print('Order log is empty.')
         print('Data written to test trade log.')
         print(old_df)
+
+    def round_up(n, decimals=0):
+        multiplier = 10 ** decimals
+        return np.ceil(n * multiplier) / multiplier
