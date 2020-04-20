@@ -14,20 +14,37 @@ env._act(1)
 # time.sleep(60)
 
 
+print('Initializing agent...', end = ' ')
+agent = DQNAgent(state_size, action_size)
+# agent = SimpleAgent(state_size, action_size)
+my_scaler = get_scaler(sim_env)
 
-# print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
-# state = env.update() #This fetches data and preapres it, and also gets
-# print(state)
-#
-# action = agent.act(state)
-# # print(action)
-# next_state, val, reward, done = env.step(action)
-#
-# if agent.name == 'dqn':next_state = scaler.transform([next_state])
-# if is_train in ['train']:
-#     agent.train(state, action, reward, next_state, done)
-#
-# state = next_state
+if agent.name == 'dqn':
+    # then load the previous scaler
+    with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+        my_scaler = pickle.load(f)
+
+    # make sure epsilon is not 1!
+    # no need to run multiple episodes if epsilon = 0, it's deterministic
+    agent.epsilon_min = 0.00#1
+    agent.epsilon = agent.epsilon_min
+
+    # load trained weights
+    agent.load(f'{models_folder}/linear.npz')
+print('Testing...')
+start_time = datetime.now()
+while datetime.now() < start_time + timedelta(hours =1):
+    print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
+    state = env.update() #This fetches data and preapres it, and also gets
+    print(state)
+    if agent.name == 'dqn':next_state = scaler.transform([next_state])
+    action = agent.act(state)
+    print('Sleeping')
+    time.sleep(60)
+
+
+state = next_state
+
 
 
 

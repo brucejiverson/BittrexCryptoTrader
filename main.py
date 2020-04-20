@@ -107,6 +107,7 @@ def get_scaler(env):
     Running for multiple episodes will make more accurate
     """
 
+    #Create a list of all of the states to gather mean/variance data on
     states = []
     for _ in range(env.n_step):
         action = np.random.choice(env.action_space)
@@ -136,7 +137,7 @@ def play_one_episode(agent, env, scaler, is_train):
         # print(action)
         next_state, val, reward, done = env.step(action)
 
-        if agent.name == 'dqn':next_state = scaler.transform([next_state])
+        if agent.name == 'dqn': next_state = scaler.transform([next_state])
         if is_train in ['train']:
             agent.train(state, action, reward, next_state, done)
 
