@@ -776,6 +776,13 @@ class BittrexExchange(ExchangeEnvironment):
 
         return self._get_state(), self._get_val()
 
+    def update(self):
+        end = datetime.now()
+        start = datetime.now() - timedelta(days = 1)
+
+        env.fetch_data(start, end)
+        env.prepare_data()
+
 
     def _get_state(self):
           # Returns the state (for now state, and observation are the same.
