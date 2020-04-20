@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 import json
 
 env = BittrexExchange(money_to_use = 5)
-env._trade('USD-BTC', -5)
-env.view_order_data()
-# env.get_and_save_order_history()
+env.get_latest_candle(env.markets[0])
+# env._trade('USD-BTC', -5)
+# env.view_order_data()
 
 #BELOW IS REFERENCE FROM BITREX.BITTREX LIBRARY
 # def cancel(self, uuid):

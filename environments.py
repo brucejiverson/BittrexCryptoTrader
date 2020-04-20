@@ -773,8 +773,7 @@ class BittrexExchange(ExchangeEnvironment):
 
 
     def _act(self, action):
-
-        '''
+        """
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
 
@@ -782,11 +781,11 @@ class BittrexExchange(ExchangeEnvironment):
 
         if action_vec != self.last_action:  # if attmepting to change state
 
-            #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
-            #Calculate the changes needed for each asset
-            delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
-            '''
-            #currently set up for only bitcoin
+        #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
+        #Calculate the changes needed for each asset
+        delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
+        """
+        #currently set up for only bitcoin
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
 
@@ -806,15 +805,15 @@ class BittrexExchange(ExchangeEnvironment):
 
             for i, a in enumerate(action_vec): #for each asset
 
-            """
-            4/18 - This is currently structured to work with a simple USD-BTC pairing only. Eventually, this will need to have the following logic:
+                """
+                4/18 - This is currently structured to work with a simple USD-BTC pairing only. Eventually, this will need to have the following logic:
 
-            -cycle through every element in action_vec and see if you need to sell any of that coin
-                -execute all sells as they come up to stock up on usd
-            -cycle through every element in action_vec and see if you need to buy any of that coin
-                -<should probably find a way to write this such that it only cycles through the elements where selling did not occur for efficiency>
-                -execute all buys
-            """
+                -cycle through every element in action_vec and see if you need to sell any of that coin
+                    -execute all sells as they come up to stock up on usd
+                -cycle through every element in action_vec and see if you need to buy any of that coin
+                    -<should probably find a way to write this such that it only cycles through the elements where selling did not occur for efficiency>
+                    -execute all buys
+                """
 
                 current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
                 currency_pair = self.markets[i]                         #which currency pair is being evaluated
@@ -840,7 +839,7 @@ class BittrexExchange(ExchangeEnvironment):
 
 
 
-                    """
+            """
             fractional_change = a - (self.assets_owned[i]*self.asset_prices[i])/cur_val#desired fraction of portfolio to have in asset - fraction held
 
             if abs(fractional_change) > .05: #Porfolio granulartitty will change with asset price movement. This sets a threshhold for updating position
@@ -899,6 +898,34 @@ class BittrexExchange(ExchangeEnvironment):
                     break
 
 
+    def get_latest_candle(self, currency_pair):
+        """This method fetches recent candle data on a specific market.
+        currency_pair should be a string, 'USD-BTC' """
+
+        for i, market in enumerate(self.markets):
+            print('Fetching last candle for ' + market + ' from the exchange.')
+            attempts_left = 3
+            while True:
+                print('Fetching candles from Bittrex...', end = " ")
+                candle_dict = self.bittrex_obj_2.get_latest_candle(market, 'oneMin')
+
+                if candle_dict['success']:
+                    candle_df = self._process_candle_dict(candle_dict, market)
+                    print("Success.")
+                    print(candle_df)
+                    break
+                else: #If there is an error getting the proper data
+                    print("Failed to get candle data. Candle dict: ", end = ' ')
+                    print(candle_dict)
+                    time.sleep(2*attempts)
+                    attempts += 1
+
+                    if attempts == 5:
+                        print('Exceeded maximum number of attempts.')
+                        raise(TypeError)
+                    print('Retrying...')
+
+
     def get_all_balances(self):
         """This method retrieves the account balanes for each currency including
          USD from the exchange."""
@@ -952,7 +979,8 @@ class BittrexExchange(ExchangeEnvironment):
         df = pd.Series(info, index = labels)
 
         print(df)
-        
+
+
     def cancel_all_orders(self):
         """This method looks for any open orders associated with the account,
         and cancels those orders. VALIDATED"""
