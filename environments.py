@@ -871,7 +871,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                     trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
 
-                    self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
+                    self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount in USD
 
 
     def _get_val(self):
@@ -1001,6 +1001,7 @@ class BittrexExchange(ExchangeEnvironment):
         print(df)
         print(' ')
 
+
     def cancel_all_orders(self):
         """This method looks for any open orders associated with the account,
         and cancels those orders. VALIDATED"""
@@ -1037,13 +1038,13 @@ class BittrexExchange(ExchangeEnvironment):
 
         if amount > 0:  # buy
             rate = round(self.asset_prices[0]*(1 + self.mean_spread/2), 3)
-            amount_currency = round(amount/rate, 4)
+            amount_currency = round(amount/rate, 6)
             coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
             order_entry_status = self.bittrex_obj_1_1.buy_limit(currency_pair, amount_currency, rate)
             side = 'buying'
         else:       # Sell
             rate = round(self.asset_prices[0]*(1 - self.mean_spread/2), 3)
-            amount_currency = round(-amount/rate, 4)
+            amount_currency = round(-amount/rate, 6)
             order_entry_status = self.bittrex_obj_1_1.sell_limit(currency_pair, amount_currency, rate)
             side = 'selling'
 
@@ -1183,6 +1184,7 @@ class BittrexExchange(ExchangeEnvironment):
 
     def save_log(self):
         self.log.to_csv(paths['account log'], index = True, index_label = 'Timestamp', date_format = '%Y-%m-%d %I-%p-%M')
+
 
     def get_and_save_order_history(self):
         """FOR NOW I AM LEAVING THIS INCOMPLETE. THE GET_ORDER METHOD RETRIEVE MORE INFORMATION ON
