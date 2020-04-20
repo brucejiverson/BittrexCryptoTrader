@@ -24,8 +24,8 @@ paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bit
 'secret': "/Users/biver/Documents/crypto_data/secrets.json",
 'rewards': 'agent_rewards',
 'models': 'agent_models',
-'order log': 'C:/Python Programs/crypto_trader/order logs/order_log.csv',
-'test trade log':  'C:/Python Programs/crypto_trader/order logs/trade_testingBTCUSD.csv'}
+'order log': 'C:/Python Programs/crypto_trader/account logs/order_log.csv',
+'test trade log':  'C:/Python Programs/crypto_trader/account logs/trade_testingBTCUSD.csv'}
 
 
 def ROI(initial, final):
@@ -1060,7 +1060,7 @@ class BittrexExchange(ExchangeEnvironment):
                 self.print_account_health()
 
 
-                print('Updating log...')    
+                print('Updating log...')
                 btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
                 cur_val = btc_amt + self.USD
                 self.log = self.log.append(pd.DataFrame.from_records(
@@ -1148,7 +1148,11 @@ class BittrexExchange(ExchangeEnvironment):
         # #Load the trade log from csv
         #Note that the dateformat for this is different than for the price history.
         #The format is the same in csv as the bittrex API returns for order data
-        def dateparse(x): return pd.datetime.strptime(x, date_format)
+        def dateparse(x):
+            try:
+                return pd.datetime.strptime(x, date_format)
+            except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
+                return x
         df = pd.read_csv(path, parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
         df.set_index('Opened', inplace = True, drop = True)
         df = df.append(order_df, sort = False)
