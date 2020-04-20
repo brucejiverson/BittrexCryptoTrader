@@ -82,6 +82,7 @@ class ExchangeEnvironment:
         self.df = None
         self.candle_df = None
         self.transformed_df = None
+        self.asset_data = None
         self.mean_spread = .0003 #fraction of the price to use as spread when placing limit orders
         self.spread = 0.995 #this is the one we're using to deal with 100% moves
         # log_columns = [*[x for x in self.markets], 'Value']
@@ -249,7 +250,7 @@ class ExchangeEnvironment:
                     self.df.drop(columns=[col], inplace = True)
 
         #This is here before the stripped_df get made to be stationary
-        self.asset_data = self.df.values #for sim only
+        self.asset_data = self.df.values #used in sim only
 
         print('PREPARED DATA:')
         print(self.df.head())
@@ -472,6 +473,15 @@ class ExchangeEnvironment:
             print(' ')
 
 
+        fig, ax = plt.subplots(1, 1)  # Create the figure
+        fig.suptitle('Transformed data', fontsize=14, fontweight='bold')
+
+        for col in transformed_df.columns:
+                transformed_df.plot(y=col, ax=ax)
+
+        fig.autofmt_xdate()
+
+
     def plot_agent_history(self):
         """This method plots performance of an agent over time.
         """
@@ -518,17 +528,6 @@ class ExchangeEnvironment:
         fig.autofmt_xdate()
 
 
-    def plot_stationary_data(self):
-        assert not self.transformed_df.empty
-        fig, ax = plt.subplots(1, 1)  # Create the figure
-
-        fig.suptitle('Transformed data', fontsize=14, fontweight='bold')
-
-        for col in self.transformed_df.columns:
-                self.transformed_df.plot(y=col, ax=ax)
-
-        fig.autofmt_xdate()
-
 
 class SimulatedCryptoExchange(ExchangeEnvironment):
     """
@@ -548,10 +547,9 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         """The data, for asset_data can be thought of as nested arrays, where indexing the
         highest order array gives a snapshot of all data at a particular time, and information at the point
         in time can be captured by indexing that snapshot."""
-        self.asset_data = None
 
         self._fetch_data(start, end)
-        self._prepare_data()
+        self._prepare_data() #This fills in the asset_data array
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, n_features = self.asset_data.shape
 
@@ -571,7 +569,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         """ the data, for asset_data can be thought of as nested arrays, where indexing the
         highest order array gives a snapshot of all data at a particular time, and information at the point
         in time can be captured by indexing that snapshot."""
-        self.asset_prices = self.asset_data[self.cur_step][0:self.n_asset]
+        self.asset_prices = self.asset_data[self.cur_step][0:self.n_asset] #assumes data is asset prices and then volums
 
         self.USD = self.initial_investment
 
@@ -610,8 +608,9 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         btc_amt = self._get_btc()*self.asset_prices[0]
 
         if self.should_log:
-            row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val]}, index=datetime.now()+timedelta(hours=7))
-            self.log = self.log.append(row, sort = False)
+            row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':[datetime.now()+timedelta(hours=7)]})
+            row.set_index('Timestamp', drop = True, inplace = True)
+            self.log = self.log.append(row, sort = True)
 
         def log_ROI(initial, final):
             """ Returns the log rate of return, which accounts for how percent changes "stack" over time
@@ -675,6 +674,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
                 state[n::] = slice[n::] #these are indicators. Valdiated they are preserved
                 # print(state)
+                # print(type(state))
 
         except ValueError:  #Print shit out to help with debugging then throw error
             print("Error in simulated market class, _get_state method.")
@@ -774,7 +774,7 @@ class BittrexExchange(ExchangeEnvironment):
         print('Updating log...')
         btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
         cur_val = btc_amt + self.USD
-        row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val]}, index=datetime.now()+timedelta(hours=7))
+        row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':datetime.now()+timedelta(hours=7)})
         self.log = self.log.append(row, sort = False)
         print('Done')
 

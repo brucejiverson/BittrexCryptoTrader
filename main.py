@@ -113,7 +113,7 @@ def get_scaler(env):
         action = np.random.choice(env.action_space)
         state, val, reward, done = env.step(action)
         states.append(state)
-        if done:pytho
+        if done:
             break
 
     scaler = StandardScaler()
@@ -126,7 +126,7 @@ def play_one_episode(agent, env, scaler, is_train):
     # note: after transforming states are already 1xD
 
     state, val  = env.reset()
-    print(state)
+    print(state) #validated type is numpy.ndarray()
     if agent.name == 'dqn': state = scaler.transform([state])
     print(state)
 

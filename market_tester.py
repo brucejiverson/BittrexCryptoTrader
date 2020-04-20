@@ -33,16 +33,23 @@ if agent.name == 'dqn':
     agent.load(f'{models_folder}/linear.npz')
 print('Testing...')
 start_time = datetime.now()
+counter = 10
 while datetime.now() < start_time + timedelta(hours =1):
     print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
     state = env.update() #This fetches data and preapres it, and also gets
     print(state)
     if agent.name == 'dqn':next_state = scaler.transform([next_state])
     action = agent.act(state)
+
+    if counter == 0: env.save_log()
+    else: counter -= 1
+
     print('Sleeping.')
     time.sleep(60)
 
 
+env.plot_market_data()
+env.plot_agent_history()
 
 
 
