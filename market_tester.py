@@ -7,7 +7,7 @@ import json
 
 env = BittrexExchange(money_to_use = 5)
 # print(env.action_list)
-env._act(0)
+env._act(1)
 # env._trade('USD-BTC', -5)
 # env.view_order_data()
 # env.get_latest_candle(env.markets[0])
@@ -39,11 +39,9 @@ while datetime.now() < start_time + timedelta(hours =1):
     print(state)
     if agent.name == 'dqn':next_state = scaler.transform([next_state])
     action = agent.act(state)
-    print('Sleeping')
+    print('Sleeping.')
     time.sleep(60)
 
-
-state = next_state
 
 
 
