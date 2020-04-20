@@ -125,8 +125,10 @@ def play_one_episode(agent, env, scaler, is_train):
     # note: after transforming states are already 1xD
 
     state, val  = env.reset()
-
+    print(state)
     if agent.name == 'dqn': state = scaler.transform([state])
+    print(state)
+
     done = False
 
     while not done:
@@ -170,8 +172,8 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
 
-    # agent = DQNAgent(state_size, action_size)
-    agent = SimpleAgent(state_size, action_size)
+    agent = DQNAgent(state_size, action_size)
+    # agent = SimpleAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)
 
     if mode == 'test':
@@ -283,7 +285,7 @@ if __name__ == '__main__':
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
 
-        end = datetime(2020, 4, 18)
+        end = datetime.now()
         start = end - timedelta(days = 9)
 
         # start = datetime(2018, 3, 1)
