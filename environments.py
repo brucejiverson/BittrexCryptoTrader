@@ -766,18 +766,27 @@ class BittrexExchange(ExchangeEnvironment):
 
 
     def _get_state(self):
-        # Returns the state (for now state, and observation are the same.
-        # Note that the state could be a transformation of the observation, or
-        # multiple past observations stacked.)
-        state = np.empty(self.state_dim)  #assets_owned, USD
+          # Returns the state (for now state, and observation are the same.
+          # Note that the state could be a transformation of the observation, or
+          # multiple past observations stacked.)
+          state = np.empty(self.state_dim)  #assets_owned, USD
 
-        slice_df = self.df.tail(2)
+          slice_df = self.df.tail(2)                            #snapshot of df with last 2 rows
 
-        slice = slice_df
+          for i, a in enumerate(self.markets):                  #relies on formatting open, high, los, close, volume in order
+              cols = [0+5*i,2+5*i]                              #cycles through cols 0 to 2, 5 to 7, 10 to 12, etc depending on how many markets
+              slice_df.drop(self_df.columns[cols], axis =1)     #only keeping close, volume
 
+          penult_row = slice_df.head(1)                         #making first row in slice_df an array
+          ult_row = slice_df.tail(1)                            #last row in slice_df an array
 
+          for i, a in enumerate(self.markets):
+              ult_row[0+2*i] -= penult_row[0+2*i]                # correcting each market's close to be a delta rather than its value
+              ult_row[1+2*i] -= penult_row[1+2*i]                # correcting each market's volume to be a delta
 
-        return state
+          state = ult_row.values
+
+          return state
 
 
     def _act(self, action):
@@ -831,7 +840,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                 if -decimal_diff > threshhold:                          #sell if decimal_diff is sufficiently negative
 
-                    print("Aw jeez, I've got " + str(decimal_diff*100) + "% too much of my portfolio in " + str(currency_pair[4:]))
+                    print("Aw jeez, I've got " + str(round(decimal_diff*100,2)) + "% too much of my portfolio in " + str(currency_pair[4:]))
 
                     trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD, formatted to be neg for _trade logic
 
@@ -839,7 +848,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                 elif decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
 
-                    print("Oh boy, time to spend " + str(decimal_diff*100) + "% more of my portfolio on " + str(currency_pair[4:]))
+                    print("Oh boy, time to spend " + str(round(decimal_diff*100,2)) + "% more of my portfolio on " + str(currency_pair[4:]))
 
                     trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
 
@@ -990,7 +999,6 @@ class BittrexExchange(ExchangeEnvironment):
         print('Account info: ')
         print(df)
         print(' ')
-
 
     def cancel_all_orders(self):
         """This method looks for any open orders associated with the account,
