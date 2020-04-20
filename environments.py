@@ -610,8 +610,8 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         btc_amt = self._get_btc()*self.asset_prices[0]
 
         if self.should_log:
-            self.log = self.log.append(pd.DataFrame.from_records(
-                [dict(zip(self.log.columns, [btc_amt, cur_val]))]), ignore_index=True)
+            row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val]}, index=datetime.now()+timedelta(hours=7))
+            self.log = self.log.append(row, sort = False)
 
         def log_ROI(initial, final):
             """ Returns the log rate of return, which accounts for how percent changes "stack" over time
@@ -769,6 +769,14 @@ class BittrexExchange(ExchangeEnvironment):
         self._fetch_data(start, end)
         self._prepare_data()
         self.get_all_balances()
+
+        print('Updating log...')
+        btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
+        cur_val = btc_amt + self.USD
+        row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val]}, index=datetime.now()+timedelta(hours=7))
+        self.log = self.log.append(row, sort = False)
+        print('Done')
+
         return self._get_state()
 
 
@@ -1172,6 +1180,9 @@ class BittrexExchange(ExchangeEnvironment):
         print('ALL ORDER INFORMATION:')
         print(df)
 
+
+    def save_log(self):
+        self.log.to_csv(paths['account log'], index = True, index_label = 'Timestamp', date_format = '%Y-%m-%d %I-%p-%M')
 
     def get_and_save_order_history(self):
         """FOR NOW I AM LEAVING THIS INCOMPLETE. THE GET_ORDER METHOD RETRIEVE MORE INFORMATION ON
