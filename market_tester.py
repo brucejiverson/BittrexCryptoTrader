@@ -5,19 +5,21 @@ import pandas as pd
 from datetime import datetime, timedelta
 import json
 
-env = BittrexExchange(money_to_use = 5)
+env = BittrexExchange()
+state = env.reset()
 # print(env.action_list)
-env._act(1)
+# env._act(0)
 # env._trade('USD-BTC', -5)
 # env.view_order_data()
 # env.get_latest_candle(env.markets[0])
 # time.sleep(60)
 
-
+state_size = env.state_dim
+action_size = len(env.action_space)
 print('Initializing agent...', end = ' ')
-agent = DQNAgent(state_size, action_size)
-# agent = SimpleAgent(state_size, action_size)
-my_scaler = get_scaler(sim_env)
+agent = SimpleAgent(state_size, action_size)
+# agent = DQNAgent(state_size, action_size)
+# my_scaler = get_scaler(env)
 
 if agent.name == 'dqn':
     # then load the previous scaler
@@ -27,25 +29,33 @@ if agent.name == 'dqn':
     # make sure epsilon is not 1!
     # no need to run multiple episodes if epsilon = 0, it's deterministic
     agent.epsilon_min = 0.00#1
+
     agent.epsilon = agent.epsilon_min
 
     # load trained weights
     agent.load(f'{models_folder}/linear.npz')
-print('Testing...')
+
+print('done.')
+print('Oohh wee, here I go trading again!')
 start_time = datetime.now()
 counter = 10
-while datetime.now() < start_time + timedelta(hours =1):
+while datetime.now() < start_time + timedelta(hours = 3):
     print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
     state = env.update() #This fetches data and preapres it, and also gets
-    print(state)
     if agent.name == 'dqn':next_state = scaler.transform([next_state])
     action = agent.act(state)
-
+    print('State: ', end = ' ')
+    print(state)
+    print('Predicted best action:', end = ' ')
+    print(env.action_list[action])
+    env.act(action)
     if counter == 0: env.save_log()
     else: counter -= 1
 
-    print('Sleeping.')
-    time.sleep(60)
+    sleep_time = 60*10 #in seconds
+    print(env.log)
+    print(f'Sleeping for {sleep_time} seconds.')
+    time.sleep(sleep_time)
 
 
 env.plot_market_data()

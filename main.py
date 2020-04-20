@@ -126,9 +126,10 @@ def play_one_episode(agent, env, scaler, is_train):
     # note: after transforming states are already 1xD
 
     state, val  = env.reset()
-    print(state) #validated type is numpy.ndarray()
-    if agent.name == 'dqn': state = scaler.transform([state])
-    print(state)
+    try:
+        if agent.name == 'dqn': state = scaler.transform([state])
+    except ValueError:
+        print('State size has changed. Revert or retrain.')
 
     done = False
 
@@ -136,9 +137,9 @@ def play_one_episode(agent, env, scaler, is_train):
         action = agent.act(state)
         # print(action)
         next_state, val, reward, done = env.step(action)
-
         if agent.name == 'dqn': next_state = scaler.transform([next_state])
-        if is_train in ['train']:
+
+        if is_train in ['train'] and agent.name == 'dqn':
             agent.train(state, action, reward, next_state, done)
 
         state = next_state
@@ -173,8 +174,8 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
 
-    agent = DQNAgent(state_size, action_size)
-    # agent = SimpleAgent(state_size, action_size)
+    # agent = DQNAgent(state_size, action_size)
+    agent = SimpleAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)
 
     if mode == 'test':
@@ -279,7 +280,7 @@ if __name__ == '__main__':
 
         # start = datetime(2018, 3, 15)
         # end = datetime(2018, 4, 1)
-        start = datetime.now() - timedelta(days = 10)
+        start = datetime.now() - timedelta(days = 9)
         end = datetime.now()
 
     elif mode == 'test':

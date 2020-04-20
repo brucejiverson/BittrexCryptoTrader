@@ -25,7 +25,8 @@ paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bit
 'rewards': 'agent_rewards',
 'models': 'agent_models',
 'order log': 'C:/Python Programs/crypto_trader/account logs/order_log.csv',
-'test trade log':  'C:/Python Programs/crypto_trader/account logs/trade_testingBTCUSD.csv'}
+'test trade log':  'C:/Python Programs/crypto_trader/account logs/trade_testingBTCUSD.csv',
+'account log': 'C:/Python Programs/crypto_trader/account logs/live_account_log.csv'}
 
 
 def ROI(initial, final):
@@ -232,9 +233,6 @@ class ExchangeEnvironment:
     def _prepare_data(self):
         """This method takes the raw candle data and constructs features, changes granularity, etc."""
 
-        print("PRICE HISTORY DATA: ")
-        print(self.candle_df.head())
-        print(self.candle_df.tail())
         # df = self._change_df_granularity(10)
 
         self.df = self.candle_df.copy()
@@ -252,13 +250,8 @@ class ExchangeEnvironment:
         #This is here before the stripped_df get made to be stationary
         self.asset_data = self.df.values #used in sim only
 
-        print('PREPARED DATA:')
-        print(self.df.head())
-        print(self.df.tail())
 
-
-
-    def _change_df_granulaty(self, gran):
+    def _change_df_granularity(self, gran):
         """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes).
         This could possibly be imporved in the future with the ".resample()" method."""
 
@@ -485,7 +478,7 @@ class ExchangeEnvironment:
     def plot_agent_history(self):
         """This method plots performance of an agent over time.
         """
-        print(self.log.head())
+        # print(self.log.head())
 
         assert not self.log.empty
         fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
@@ -494,7 +487,7 @@ class ExchangeEnvironment:
             token = market[4:7]
 
             market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
-            fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+            fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
             self.df.plot( y=token +'Close', ax=ax1)
 
         my_roi = ROI(self.log['Total Value'].iloc[0], self.log['Total Value'].iloc[-1])
@@ -502,7 +495,7 @@ class ExchangeEnvironment:
         print(f'Sharpe Ratio: {sharpe}') #one or better is good
 
         self.log.plot(y='Total Value', ax=ax2)
-        self.log.plot(y='BTC', ax = ax2)            # !!! not formatted to work with multiple coins
+        # self.log.plot(y='BTC', ax = ax2)            # !!! not formatted to work with multiple coins
         fig.autofmt_xdate()
 
 
@@ -517,7 +510,7 @@ class ExchangeEnvironment:
             token = market[4:7]
 
             market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
-            fig.suptitle('Market performance: ' + str(market_perf), fontsize=14, fontweight='bold')
+            fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
             self.df.plot( y=token +'Close', ax=ax1)
 
 
@@ -526,7 +519,6 @@ class ExchangeEnvironment:
                 self.df.plot(y=col, ax=ax2)
 
         fig.autofmt_xdate()
-
 
 
 class SimulatedCryptoExchange(ExchangeEnvironment):
@@ -549,7 +541,14 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         in time can be captured by indexing that snapshot."""
 
         self._fetch_data(start, end)
+        print("PRICE HISTORY DATA: ")
+        print(self.candle_df.head())
+        print(self.candle_df.tail())
         self._prepare_data() #This fills in the asset_data array
+        self._change_df_granularity(10)
+        print('PREPARED DATA:')
+        print(self.df.head())
+        print(self.df.tail())
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, n_features = self.asset_data.shape
 
@@ -610,7 +609,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         if self.should_log:
             row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':[datetime.now()+timedelta(hours=7)]})
             row.set_index('Timestamp', drop = True, inplace = True)
-            self.log = self.log.append(row, sort = True)
+            self.log = self.log.append(row, sort = False)
 
         def log_ROI(initial, final):
             """ Returns the log rate of return, which accounts for how percent changes "stack" over time
@@ -748,8 +747,15 @@ class BittrexExchange(ExchangeEnvironment):
         # Resets the environement to the initial state
         end = datetime.now()
         start = end - timedelta(days = 1)
+
         self._fetch_data(start, end)
+        print('PREPARED DATA:')
+        print(self.candle_df.head())
+        print(self.candle_df.tail())
         self._prepare_data()
+        print('PREPARED DATA:')
+        print(self.df.head())
+        print(self.df.tail())
 
         self.cancel_all_orders()
         self.get_all_balances()
@@ -765,7 +771,7 @@ class BittrexExchange(ExchangeEnvironment):
 
     def update(self):
         end = datetime.now()
-        start = datetime.now() - timedelta(days = 1)
+        start = datetime.now() - timedelta(hours = 6)
 
         self._fetch_data(start, end)
         self._prepare_data()
@@ -775,6 +781,7 @@ class BittrexExchange(ExchangeEnvironment):
         btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
         cur_val = btc_amt + self.USD
         row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':datetime.now()+timedelta(hours=7)})
+        row.set_index('Timestamp', drop = True, inplace = True)
         self.log = self.log.append(row, sort = False)
         print('Done')
 
@@ -800,7 +807,7 @@ class BittrexExchange(ExchangeEnvironment):
           return state
 
 
-    def _act(self, action):
+    def act(self, action):
         """
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
@@ -1038,7 +1045,7 @@ class BittrexExchange(ExchangeEnvironment):
         # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
 
         if amount > 0:  # buy
-            rate = round(self.asset_prices[0], 3)
+            rate = round(self.asset_prices[0]*(1+self.mean_spread/2), 3)
 
             amount_currency = round(amount/rate, 6)
 
@@ -1053,7 +1060,7 @@ class BittrexExchange(ExchangeEnvironment):
 
         else:       # Sell
                  # cur_price is last price, meaning the last that was traded on the exchange
-            rate = round(self.asset_prices[0], 3)
+            rate = round(self.asset_prices[0]*(1-self.mean_spread), 3)
 
             amount_currency = round(-amount/rate, 6)
             most_possible = round(self.assets_owned[0] * self.spread, 6)
@@ -1090,12 +1097,12 @@ class BittrexExchange(ExchangeEnvironment):
                 self.print_account_health()
 
 
-                print('Updating log...')
-                btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
-                cur_val = btc_amt + self.USD
-                self.log = self.log.append(pd.DataFrame.from_records(
-                    [dict(zip(self.log.columns, [btc_amt, cur_val]))]), ignore_index=True)
-                print('Done')
+                # print('Updating log...')
+                # btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
+                # cur_val = btc_amt + self.USD
+                # self.log = self.log.append(pd.DataFrame.from_records(
+                #     [dict(zip(self.log.columns, [btc_amt, cur_val]))]), ignore_index=True)
+                # print('Done')
 
 
             #this saves the information regardless of if the trade was successful or not
@@ -1195,17 +1202,34 @@ class BittrexExchange(ExchangeEnvironment):
 
     def view_order_data(self):
 
-        def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%dT%H:%M:%S")
+        date_format = "%Y-%m-%dT%H:%M:%S"
+        def dateparse(x):
+            try:
+                return pd.datetime.strptime(x, date_format)
+            except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
+                return x
         df = pd.read_csv(paths['order log'], parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
         df.set_index('Opened', inplace = True, drop = True)
         print(' ')
         print('ALL ORDER INFORMATION:')
         print(df)
+        print(' ')
 
 
     def save_log(self):
-        self.log.to_csv(paths['account log'], index = True, index_label = 'Timestamp', date_format = '%Y-%m-%d %I-%p-%M')
+        """This method append to the log to the csv."""
 
+        print('Saving account log...', end = ' ')
+        path = paths['account log']
+        date_format = "%Y-%m-%d %I-%p-%M"
+
+        #Load the old log
+        def dateparse(x): return pd.datetime.strptime(x, date_format)
+        # df = pd.read_csv(path, parse_dates = ['Timestamp'], date_parser=dateparse)
+        # df.set_index('Timestamp', inplace = True, drop = True)
+        # df = df.append(self.log)
+        self.log.to_csv(path, index = True, index_label = 'Timestamp', date_format = date_format)
+        print('done.')
 
     def get_and_save_order_history(self):
         """FOR NOW I AM LEAVING THIS INCOMPLETE. THE GET_ORDER METHOD RETRIEVE MORE INFORMATION ON
