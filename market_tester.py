@@ -8,10 +8,10 @@ env = BittrexExchange(money_to_use = 5)
 # print(env.action_list)
 # env._act(1)
 # env.get_latest_candle(env.markets[0])
-time.sleep(60)
+# time.sleep(60)
 print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
-env.update() #This fetches data and preapres it,
-
+state = env.update() #This fetches data and preapres it, and also gets
+print(state)
 # env._trade('USD-BTC', -5)
 # env.view_order_data()
 

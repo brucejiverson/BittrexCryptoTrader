@@ -80,6 +80,7 @@ class ExchangeEnvironment:
 
         self.USD = None
         self.df = None
+        self.candle_df = None
         self.transformed_df = None
         self.mean_spread = .0003 #fraction of the price to use as spread when placing limit orders
 
@@ -207,7 +208,7 @@ class ExchangeEnvironment:
         df = df.loc[df.index > start_date] #not the culprit in the altered gran
         df = df.loc[df.index < end_date]
 
-        self.df = self._format_df(df)
+        self.candle_df = self._format_df(df) #completely resets the candle_df)
 
 
     def _format_df(self, df):
@@ -235,20 +236,21 @@ class ExchangeEnvironment:
         print(self.df.tail())
         # df = self._change_df_granularity(10)
 
+        self.df = self.candle_df.copy()
         self._add_features_to_df()
 
         df_cols = self.df.columns
-        stripped_df = self.df.copy()
 
         # Strip out open high low close
         for market in self.markets:
             token = market[4:7]
             for col in df_cols:
                 if col in [token + 'Open', token + 'High', token + 'Low']:
-                    stripped_df.drop(columns=[col], inplace = True)
+                    self.df.drop(columns=[col], inplace = True)
 
         #This is here before the stripped_df get made to be stationary
-        self.asset_data = stripped_df.copy().values
+        self.asset_data = self.df.values #for sim only
+
 
 
     def _change_df_granulaty(self, gran):
@@ -741,7 +743,7 @@ class BittrexExchange(ExchangeEnvironment):
         self.asset_volumes = None
 
         # self.state, self.cur_val = self.reset()
-
+        self.should_log = True
         self.print_account_health()
 
 
@@ -753,7 +755,6 @@ class BittrexExchange(ExchangeEnvironment):
         self._prepare_data()
 
         self.cancel_all_orders()
-        self.get_current_prices()
         self.get_all_balances()
 
         # #Put all money into USD
@@ -762,35 +763,32 @@ class BittrexExchange(ExchangeEnvironment):
         #     while not success:
         #         success = self._trade(-self.assets_owned[0])
 
-        return self._get_state(), self._get_val()
+        return self._get_state() #, self._get_val()
 
     def update(self):
         end = datetime.now()
         start = datetime.now() - timedelta(days = 1)
 
-        env.fetch_data(start, end)
-        env.prepare_data()
+        self._fetch_data(start, end)
+        self._prepare_data()
+        self.get_all_balances()
+        return self._get_state()
 
 
     def _get_state(self):
-          # Returns the state (for now state, and observation are the same.
+          # Returns the state (for now state, and observation are the same.)
           # Note that the state could be a transformation of the observation, or
           # multiple past observations stacked.)
           state = np.empty(self.state_dim)  #assets_owned, USD
 
-          slice_df = self.df.tail(2)                            #snapshot of df with last 2 rows
-
-          cols = [c for c in slice_df.columns if c.lower()[3:] != 'open', 'high', 'low']
-          slice_df = slice_df[cols]
-
-          penult_row = slice_df.head(1)                         #making first row in slice_df an array
-          ult_row = slice_df.tail(1)                            #last row in slice_df an array
+          penult_row = self.df.iloc[-2].values
+          ult_row = self.df.iloc[-1].values                #last row in slice_df an array
 
           for i, a in enumerate(self.markets):
               ult_row[0+2*i] -= penult_row[0+2*i]                # correcting each market's close to be a delta rather than its value
               ult_row[1+2*i] -= penult_row[1+2*i]                # correcting each market's volume to be a delta
 
-          state = ult_row.values
+          state = ult_row
 
 
           return state
@@ -883,7 +881,7 @@ class BittrexExchange(ExchangeEnvironment):
             return 0
 
 
-    def get_current_prices(self):
+    def _get_current_prices(self):
         """This method retrieves up to date price information from the exchange.
         VALIDATED"""
 
@@ -900,7 +898,7 @@ class BittrexExchange(ExchangeEnvironment):
                     print(ticker['message'])
 
                     if attempts_left == 0:
-                        print('get_current_prices has failed. exiting the method...')
+                        print('_get_current_prices has failed. exiting the method...')
                         break
                     else:
                         attempts_left -= 1
@@ -987,7 +985,7 @@ class BittrexExchange(ExchangeEnvironment):
         for cleaner formatting (if mutliple currency trading strategies are implemented)"""
 
         self.get_all_balances()
-        self.get_current_prices()
+        self._get_current_prices()
 
         labels = ['Account Value', 'USD', *[x[4:7] for x in self.markets]]
         info = [self._get_val(), self.USD, *self.assets_owned] #does this work?
@@ -1026,7 +1024,7 @@ class BittrexExchange(ExchangeEnvironment):
 
         # Note that bittrex exchange is based in GMT 8 hours ahead of CA
 
-        self.get_current_prices()
+        self._get_current_prices()
 
         # Enter a trade into the market.
         #The bittrex.bittrex buy_limit method takes 4 arguments: market, amount, rate
