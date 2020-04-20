@@ -86,6 +86,7 @@ class ExchangeEnvironment:
         log_columns = ['BTC', 'Total Value']
         self.log = pd.DataFrame(columns=log_columns)
 
+
     def _process_candle_dict(self, candle_dictionary, market):
         # Dataframe formatted the same as in other functions
         # V and BV refer to volume and base volume
@@ -235,34 +236,17 @@ class ExchangeEnvironment:
         self._add_features_to_df()
 
         df_cols = self.df.columns
-        transformed_df = self.df.copy()
+        stripped_df = self.df.copy()
 
         # Strip out open high low close
         for market in self.markets:
             token = market[4:7]
             for col in df_cols:
                 if col in [token + 'Open', token + 'High', token + 'Low']:
-                    transformed_df.drop(columns=[col], inplace = True)
+                    stripped_df.drop(columns=[col], inplace = True)
 
-        #This is here before the transformed_df get made to be stationary
-        self.asset_data = transformed_df.copy().values
-
-        # #These lines make the data stationary for stationarity testing
-        # #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
-        # cols = transformed_df.columns
-        # for i in range(2*self.n_asset): #loop through prices and volumnes
-        #     col = cols[i]
-        #     transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1)
-        #
-        # transformed_df.drop(transformed_df.index[0], inplace = True)
-
-        # self._augmented_dicky_fuller()
-
-        #this assumes that the stationary method used on the df is the same used in _get_state()
-        print("DATA TO RUN ON: ")
-        print(transformed_df.head())
-        print(transformed_df.tail())
-        self.transformed_df = transformed_df.copy()
+        #This is here before the stripped_df get made to be stationary
+        self.asset_data = stripped_df.copy().values
 
 
     def _change_df_granulaty(self, gran):
@@ -442,20 +426,43 @@ class ExchangeEnvironment:
         print('Data written.')
 
 
-    def _augmented_dicky_fuller(self):
+    def test_data_stationarity(self):
         """This method performs an ADF test on the transformed df. Code is borrowed from
-         https://www.analyticsvidhya.com/blog/2018/09/non-stationary-time-series-python/
-         Quote: If the test statistic is less than the critical value, we can reject the null
-         hypothesis (aka the series is stationary). When the test statistic is greater
-         than the critical value, we fail to reject the null hypothesis (which means
-         the series is not stationary)."""
+        https://www.analyticsvidhya.com/blog/2018/09/non-stationary-time-series-python/
+        Quote: If the test statistic is less than the critical value, we can reject the null
+        hypothesis (aka the series is stationary). When the test statistic is greater
+        than the critical value, we fail to reject the null hypothesis (which means
+        the series is not stationary)."""
+
+        # #These lines make the data stationary for stationarity testing
+        # #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
+        transformed_df = self.df.copy()
+
+        # Strip out open high low close
+        for market in self.markets:
+            token = market[4:7]
+            for col in df_cols:
+                if col in [token + 'Open', token + 'High', token + 'Low']:
+                    transformed_df.drop(columns=[col], inplace = True)
+
+        cols = transformed_df.columns
+        for i in range(2*self.n_asset): #loop through prices and volumnes
+            col = cols[i]
+            transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1)
+
+        # transformed_df.drop(transformed_df.index[0], inplace = True)
+
+        #this assumes that the stationary method used on the df is the same used in _get_state()
+        # print("TRANSFORMED DATA: ")
+        # print(transformed_df.head())
+        # print(transformed_df.tail())
 
         #Perform Dickey-Fuller test:
         print ('Results of Dickey-Fuller Test:')
         index=['Test Statistic','p-value','#Lags Used','Number of Observations Used', 'Success']
-        for col in self.transformed_df.columns:
+        for col in transformed_df.columns:
             print('Results for ' + col)
-            dftest = adfuller(self.transformed_df[col], autolag='AIC')
+            dftest = adfuller(transformed_df[col], autolag='AIC')
             success = dftest[0] < dftest[4]['1%']
             dfoutput = pd.Series([*dftest[0:4], success], index = index)
             for key,value in dftest[4].items():
