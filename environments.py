@@ -1259,11 +1259,3 @@ class BittrexExchange(ExchangeEnvironment):
             print('Order log is empty.')
         print('Data written to test trade log.')
         print(old_df)
-
-def round_up(n, decimals=0):
-    multiplier = 10 ** decimals
-    return np.ceil(n * multiplier) / multiplier
-
-def round_down(n, decimals=0):
-    multiplier = 10 ** decimals
-    return np.floor(n * multiplier) / multiplier
