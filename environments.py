@@ -110,7 +110,7 @@ class ExchangeEnvironment:
 
     def _fetch_data(self, start_date, end_date):
         """This function pulls data from the exchange, the cumulative repository, and the data download in that order
-        depending on the input date range."""
+        depending on the input date range. Typically called in the __init__ method"""
 
         print('Fetching historical data...')
 
@@ -214,8 +214,8 @@ class ExchangeEnvironment:
 
 
     def _format_df(self, df):
-        """This function formats the dataframe according to the assets that are in it. Needss to be updated to handle multiple assets.
-        Note that this should only be used before high low open are stripped from the data."""
+        """This function formats the dataframe according to the assets that are in it.
+        Needs to be updated to handle multiple assets. Note that this should only be used before high low open are stripped from the data."""
         # input_df = input_df[['Date', 'BTCClose']]
         formatted_df = df.copy()
         formatted_df = formatted_df.loc[~formatted_df.index.duplicated(keep = 'first')] #this is intended to remove duplicates. ~ flips bits
@@ -231,7 +231,8 @@ class ExchangeEnvironment:
 
 
     def _prepare_data(self):
-        """This method takes the raw candle data and constructs features, changes granularity, etc."""
+        """This method takes the raw candle data and constructs features, changes granularity, etc.
+        Typically called in the init method"""
 
         # df = self._change_df_granularity(10)
 
@@ -247,6 +248,7 @@ class ExchangeEnvironment:
                 if col in [token + 'Open', token + 'High', token + 'Low']:
                     self.df.drop(columns=[col], inplace = True)
 
+        print(self.df.head())
         #This is here before the stripped_df get made to be stationary
         self.asset_data = self.df.values #used in sim only
 
@@ -668,6 +670,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                 # print(slice[0:n])
                 #BELOW IS THE OLD WAY OF DOING IT
                 n = self.n_asset*2 #price and volume
+                print(slice[0:n])
                 state[0:n] = slice[0:n] - last_slice[0:n] #simple differencing for price and volume
                 # state[0:n] = np.log(slice[0:n]) - np.log(last_slice[0:2]) #this is price and volume
 

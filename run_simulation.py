@@ -134,6 +134,7 @@ def play_one_episode(agent, env, scaler, is_train):
     done = False
 
     while not done:
+        # print(state[2:])
         action = agent.act(state)
         # print(action)
         next_state, val, reward, done = env.step(action)
@@ -223,7 +224,7 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
 
         print(f"episode: {e + 1}/{num_episodes}, ", end = ' ')
         print(f"end value: {val:.2f}, episode roi: {roi:.2f}%, ", end = ' ')
-        print(f"time remaining: {time_remaining + timedelta(seconds = 3)}")
+        print(f"time remaining: {time_remaining + timedelta(seconds = 5)}")
         portfolio_value.append(val)  # append episode end portfolio value
 
     sim_env.plot_market_data()

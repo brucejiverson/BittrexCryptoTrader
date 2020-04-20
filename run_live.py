@@ -39,7 +39,7 @@ print('done.')
 print('Oohh wee, here I go trading again!')
 start_time = datetime.now()
 counter = 10
-while datetime.now() < start_time + timedelta(hours = 3):
+while datetime.now() < start_time + timedelta(hours = 10):
     print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
     state = env.update() #This fetches data and preapres it, and also gets
     if agent.name == 'dqn':next_state = scaler.transform([next_state])

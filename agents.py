@@ -142,6 +142,7 @@ class SimpleAgent():
 
 
     def act(self, state):
+        # print(state)
         # This is the policy
         #Currently assumes only bitcoin is in use, and that RSI is the last feature in the state
         # print(state)
@@ -153,7 +154,7 @@ class SimpleAgent():
         # if rsi < -2.5: #-2.5 gives no downdraw, 2.81% over 10 days. Positive vals no good
         # if macd > 1: # [0] 6%, [1] 8.68% over 10 days
         # if macd > 0 and rsi < -1: # 8.7% over 10 days [0,0]
-        if obv < 0: #[-.1] 10.22% [-.5] 9.35% better downdraw. [-1] 8.1% no downdraw 10 days.
+        if obv < -1: #[-.1] 10.22% [-.5] 9.35% better downdraw. [-1] 8.1% no downdraw 10 days.
         # if obv < -.1 and macd > 1 and rsi < -.5:
             return 1
         else: #sell
