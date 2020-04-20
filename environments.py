@@ -1039,6 +1039,11 @@ class BittrexExchange(ExchangeEnvironment):
         if amount > 0:  # buy
             rate = round(self.asset_prices[0]*(1 + self.mean_spread/2), 3)
             amount_currency = round(amount/rate, 6)
+            most_possible = round(self.USD/self.asset_prices[0],6)
+
+            if amount_currency*self.asset_prices[0] > self.USD:
+                amount_currency = most_possible
+
             coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
             order_entry_status = self.bittrex_obj_1_1.buy_limit(currency_pair, amount_currency, rate)
             side = 'buying'
