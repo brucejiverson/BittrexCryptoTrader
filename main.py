@@ -112,7 +112,7 @@ def get_scaler(env):
         action = np.random.choice(env.action_space)
         state, val, reward, done = env.step(action)
         states.append(state)
-        if done:
+        if done:pytho
             break
 
     scaler = StandardScaler()

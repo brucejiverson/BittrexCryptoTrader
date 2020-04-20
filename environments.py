@@ -83,7 +83,7 @@ class ExchangeEnvironment:
         self.candle_df = None
         self.transformed_df = None
         self.mean_spread = .0003 #fraction of the price to use as spread when placing limit orders
-
+        self.spread = 0.995 #this is the one we're using to deal with 100% moves
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
         log_columns = ['BTC', 'Total Value']
@@ -851,7 +851,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                 if -decimal_diff > threshhold:                          #sell if decimal_diff is sufficiently negative
 
-                    print("Aw jeez, I've got " + str(round(decimal_diff*100,2)) + "% too much of my portfolio in " + str(currency_pair[4:]))
+                    print("Aw jeez, I've got " + str(round(-decimal_diff*100,2)) + "% too much of my portfolio in " + str(currency_pair[4:]))
 
                     trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD, formatted to be neg for _trade logic
 
@@ -1038,16 +1038,11 @@ class BittrexExchange(ExchangeEnvironment):
         # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
 
         if amount > 0:  # buy
-            cur_price = self.asset_prices[0]                                     # !!! only for BTC, will need to change [0] to reference currency_pair
-            ask_price = cur_price*(1 + self.mean_spread/2)
-            print('Ask price is ' + str(ask_price) + 'USD per BTC')
-            rate = self.round_up(ask_price), 3)
-            print('Rate is ' + str(rate) + 'USD per BTC')
+            rate = round(self.asset_prices[0], 3)
 
             amount_currency = round(amount/rate, 6)
-            print('I want to buy ' + str(amount_currency) +'BTC')
-            most_possible = round(self.USD/rate,6)
-            print('The most I can afford is ' + str(most_possible) + 'BTC')
+
+            most_possible = round(self.USD/rate * self.spread, 6)
 
             if amount_currency > most_possible:
                 amount_currency = most_possible
@@ -1055,11 +1050,24 @@ class BittrexExchange(ExchangeEnvironment):
             coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
             order_entry_status = self.bittrex_obj_1_1.buy_limit(currency_pair, amount_currency, rate)
             side = 'buying'
+
         else:       # Sell
-            rate = round(self.asset_prices[0]*(1 - self.mean_spread/2), 3)
+                 # cur_price is last price, meaning the last that was traded on the exchange
+            rate = round(self.asset_prices[0], 3)
+
             amount_currency = round(-amount/rate, 6)
+            most_possible = round(self.assets_owned[0] * self.spread, 6)
+
+            if amount_currency > most_possible:
+                amount_currency = most_possible
+
+            coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
             order_entry_status = self.bittrex_obj_1_1.sell_limit(currency_pair, amount_currency, rate)
             side = 'selling'
+
+
+
+
 
         # Check that an order was entered
         if not order_entry_status['success']:
@@ -1252,6 +1260,10 @@ class BittrexExchange(ExchangeEnvironment):
         print('Data written to test trade log.')
         print(old_df)
 
-    def round_up(n, decimals=0):
-        multiplier = 10 ** decimals
-        return np.ceil(n * multiplier) / multiplier
+def round_up(n, decimals=0):
+    multiplier = 10 ** decimals
+    return np.ceil(n * multiplier) / multiplier
+
+def round_down(n, decimals=0):
+    multiplier = 10 ** decimals
+    return np.floor(n * multiplier) / multiplier

@@ -7,7 +7,7 @@ import json
 
 env = BittrexExchange(money_to_use = 5)
 # print(env.action_list)
-env._act(1)
+env._act(0)
 # env._trade('USD-BTC', -5)
 # env.view_order_data()
 # env.get_latest_candle(env.markets[0])
