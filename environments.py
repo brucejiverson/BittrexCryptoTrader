@@ -942,7 +942,7 @@ class BittrexExchange(ExchangeEnvironment):
 
 
     def get_all_balances(self):
-        """This method retrieves the account balanes for each currency including
+        """This method retrieves the account balances for each currency including
          USD from the exchange."""
 
         print('Fetching account balances...', end = ' ')
@@ -1063,6 +1063,16 @@ class BittrexExchange(ExchangeEnvironment):
                 print(f'Order has been filled. uuid: {uuid}.')
                 self.get_all_balances()        #updating with new amount of coin
                 self.print_account_health()
+
+
+                print('Updating log...')    
+                btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
+                cur_val = btc_amt + self.USD
+                self.log = self.log.append(pd.DataFrame.from_records(
+                    [dict(zip(self.log.columns, [btc_amt, cur_val]))]), ignore_index=True)
+                print('Done')
+
+
             #this saves the information regardless of if the trade was successful or not
             self._get_and_save_order_data(uuid)
 
