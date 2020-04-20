@@ -660,7 +660,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
             else:   #Make data stationary
                 slice = self.asset_data[self.cur_step]
                 last_slice = self.asset_data[self.cur_step - 1]
-
+                # print(slice)
                 def transform(x): return np.sign(x)*(np.absolute(x)**.5)
 
                 # state =  transform(slice) - transform(last_slice)
@@ -761,6 +761,7 @@ class BittrexExchange(ExchangeEnvironment):
         #         success = self._trade(-self.assets_owned[0])
 
         return self._get_state() #, self._get_val()
+
 
     def update(self):
         end = datetime.now()
