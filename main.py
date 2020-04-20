@@ -26,10 +26,9 @@ from sklearn.preprocessing import StandardScaler
 -mirror the datastructure of the sim env in the real env
 -MAKE SURE THAT ohl IS GETTING stripped at the appropriate time/way so it doesnt affect
 -Functional, automated trading
-    -update the df, also with features
+    -calculate the actual 'last_action' on inits
     -agent logging
-    -get data handling integrated
-    -test get state work
+    -test act
     -make a 'live' function, I figure it should go for a day
 
 
@@ -127,7 +126,7 @@ def play_one_episode(agent, env, scaler, is_train):
 
     state, val  = env.reset()
 
-    state = scaler.transform([state])
+    if agent.name == 'dqn': state = scaler.transform([state])
     done = False
 
     while not done:
@@ -135,10 +134,10 @@ def play_one_episode(agent, env, scaler, is_train):
         # print(action)
         next_state, val, reward, done = env.step(action)
 
-
-        next_state = scaler.transform([next_state])
+        if agent.name == 'dqn':next_state = scaler.transform([next_state])
         if is_train in ['train']:
             agent.train(state, action, reward, next_state, done)
+
         state = next_state
 
     return val

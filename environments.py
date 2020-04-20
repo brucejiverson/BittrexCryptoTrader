@@ -231,9 +231,9 @@ class ExchangeEnvironment:
     def _prepare_data(self):
         """This method takes the raw candle data and constructs features, changes granularity, etc."""
 
-        print("ORIGINAL DATA: ")
-        print(self.df.head())
-        print(self.df.tail())
+        print("PRICE HISTORY DATA: ")
+        print(self.candle_df.head())
+        print(self.candle_df.tail())
         # df = self._change_df_granularity(10)
 
         self.df = self.candle_df.copy()
@@ -250,6 +250,10 @@ class ExchangeEnvironment:
 
         #This is here before the stripped_df get made to be stationary
         self.asset_data = self.df.values #for sim only
+
+        print('PREPARED DATA:')
+        print(self.df.head())
+        print(self.df.tail())
 
 
 
@@ -441,13 +445,6 @@ class ExchangeEnvironment:
         # #These lines make the data stationary for stationarity testing
         # #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
         transformed_df = self.df.copy()
-
-        # Strip out open high low close
-        for market in self.markets:
-            token = market[4:7]
-            for col in df_cols:
-                if col in [token + 'Open', token + 'High', token + 'Low']:
-                    transformed_df.drop(columns=[col], inplace = True)
 
         cols = transformed_df.columns
         for i in range(2*self.n_asset): #loop through prices and volumnes
