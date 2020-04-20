@@ -6,14 +6,32 @@ import json
 
 env = BittrexExchange(money_to_use = 5)
 # print(env.action_list)
-# env._act(1)
-# env.get_latest_candle(env.markets[0])
-time.sleep(60)
-print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
-env.update() #This fetches data and preapres it,
-
+env._act(1)
 # env._trade('USD-BTC', -5)
 # env.view_order_data()
+# env.get_latest_candle(env.markets[0])
+# time.sleep(60)
+
+
+
+# print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
+# state = env.update() #This fetches data and preapres it, and also gets
+# print(state)
+#
+# action = agent.act(state)
+# # print(action)
+# next_state, val, reward, done = env.step(action)
+#
+# if agent.name == 'dqn':next_state = scaler.transform([next_state])
+# if is_train in ['train']:
+#     agent.train(state, action, reward, next_state, done)
+#
+# state = next_state
+
+
+
+
+
 
 #BELOW IS REFERENCE FROM BITREX.BITTREX LIBRARY
 # def cancel(self, uuid):
