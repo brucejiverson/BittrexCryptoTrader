@@ -24,9 +24,8 @@ paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bit
 'secret': "/Users/biver/Documents/crypto_data/secrets.json",
 'rewards': 'agent_rewards',
 'models': 'agent_models',
-'order log': 'C:/Python Programs/crypto_trader/account logs/order_log.csv',
-'test trade log':  'C:/Python Programs/crypto_trader/account logs/trade_testingBTCUSD.csv',
-'account log': 'C:/Python Programs/crypto_trader/account logs/account_log.csv'}
+'order log': 'C:/Python Programs/crypto_trader/order logs/order_log.csv',
+'test trade log':  'C:/Python Programs/crypto_trader/order logs/trade_testingBTCUSD.csv'}
 
 
 def ROI(initial, final):
@@ -80,7 +79,6 @@ class ExchangeEnvironment:
         self.asset_prices = [0]*self.n_asset
 
         self.USD = None
-        self.candle_df = None
         self.df = None
         self.transformed_df = None
         self.mean_spread = .0003 #fraction of the price to use as spread when placing limit orders
@@ -107,7 +105,7 @@ class ExchangeEnvironment:
         return df
 
 
-    def fetch_data(self, start_date, end_date):
+    def _fetch_data(self, start_date, end_date):
         """This function pulls data from the exchange, the cumulative repository, and the data download in that order
         depending on the input date range."""
 
@@ -122,7 +120,7 @@ class ExchangeEnvironment:
         df = pd.DataFrame(columns=cols)
 
         # Fetch candle data from bittrex for each market
-        if end_date > datetime.now() - timedelta(days=9): #this may need to be shifted to account for time offset
+        if end_date > datetime.now() - timedelta(days=9):
             for i, market in enumerate(self.markets):
                 print('Fetching ' + market + ' historical data from the exchange.')
                 attempts = 0
@@ -155,23 +153,23 @@ class ExchangeEnvironment:
 
         path = paths['cum data csv']
 
-        if df.empty or df.index.min() > start_date:  # try to fetch from updated
-            print('Fetching data from cumulative data repository.')
-
-            def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-            up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-
-            assert not up_df.empty
-            print('Success fetching from cumulative data repository.')
-            up_df.set_index('TimeStamp', drop = True, inplace = True)
-            # print(df.tail())
-            # print('CUM DATA DF:')
-            # print(up_df.head())
-            # print(up_df.tail())
-            df = df.append(up_df, sort = True)
-            # print('DATA INCL CUMULATIVE DATA REPOSITORY:')
-            # print(df.head())
-            # print(df.tail())
+        # if df.empty or df.index.min() > start_date:  # try to fetch from updated
+        #     print('Fetching data from cumulative data repository.')
+        #
+        #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+        #     up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+        #
+        #     assert not up_df.empty
+        #     print('Success fetching from cumulative data repository.')
+        #     up_df.set_index('TimeStamp', drop = True, inplace = True)
+        #     # print(df.tail())
+        #     # print('CUM DATA DF:')
+        #     # print(up_df.head())
+        #     # print(up_df.tail())
+        #     df = df.append(up_df, sort = True)
+        #     # print('DATA INCL CUMULATIVE DATA REPOSITORY:')
+        #     # print(df.head())
+        #     # print(df.tail())
 
         if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
 
@@ -200,16 +198,16 @@ class ExchangeEnvironment:
         #This was a different way that was unsuccessful. leaving for reference
         # df = df.index.indexer_between_time(start_date, end_date)
 
-        #Drop undesired currencies (that may have been carried from datascraping csv)
+        #Drop undesired currencies
         for col in df.columns:
             market = 'USD-' + col[0:3] #should result in 'USD-ETH' or similar
             #drop column if necessary
             if not market in self.markets: df.drop(columns=[col], inplace = True)
 
-        df = df.loc[df.index > start_date + timedelta(hours = 7)]
-        df = df.loc[df.index < end_date + timedelta(hours = 7)]
+        df = df.loc[df.index > start_date] #not the culprit in the altered gran
+        df = df.loc[df.index < end_date]
 
-        self.candle_df = self._format_df(df) #This completely resets the candle dataframe
+        self.df = self._format_df(df)
 
 
     def _format_df(self, df):
@@ -229,18 +227,18 @@ class ExchangeEnvironment:
         return formatted_df.dropna()
 
 
-    def prepare_data(self):
+    def _prepare_data(self):
         """This method takes the raw candle data and constructs features, changes granularity, etc."""
 
-        print("FETCHED DATA: ")
+        print("ORIGINAL DATA: ")
         print(self.df.head())
         print(self.df.tail())
         # df = self._change_df_granularity(10)
 
         self._add_features_to_df()
 
+        df_cols = self.df.columns
         stripped_df = self.df.copy()
-        df_cols = stripped_df.columns
 
         # Strip out open high low close
         for market in self.markets:
@@ -250,11 +248,7 @@ class ExchangeEnvironment:
                     stripped_df.drop(columns=[col], inplace = True)
 
         #This is here before the stripped_df get made to be stationary
-        self.asset_data = stripped_df.copy().values #This is used in simulation and not Excahnge class
-        self.df = stripped_df() #this is used in exchange class and not simulated
-        print('PREPARED DATA:')
-        print(stripped_df.head())
-        print(stripped_df.tail())
+        self.asset_data = stripped_df.copy().values
 
 
     def _change_df_granulaty(self, gran):
@@ -264,8 +258,8 @@ class ExchangeEnvironment:
         print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
 
         # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
-        self.candle_df =  self.candle_df.iloc[::gran, :]
-        self.candle_df = self._format_df(self.candle_df)
+        self.df =  self.df.iloc[::gran, :]
+        self.df = self._format_df(self.df)
         # print(input_df.head())
         # else:
         #     print('Granularity of df input to change_df_granularity was not 1 minute.')
@@ -392,10 +386,10 @@ class ExchangeEnvironment:
         for market in self.markets:
             token = market[4:7] #this is something like 'BTC' or 'ETH'
 
-            self.df[token + 'OBV'] = ta.volume.on_balance_volume(self.candle_df[token + 'Close'], self.candle_df[token + 'Volume'], fillna  = True)
+            self.df[token + 'OBV'] = ta.volume.on_balance_volume(self.df[token + 'Close'], self.df[token + 'Volume'], fillna  = True)
             self.df[token + 'OBV'] = self.df[token + 'OBV'] - self.df[token + 'OBV'].shift(1)
-            self.df[token + 'MACD'] = ta.trend.macd_diff(self.candle_df[token + 'Close'], fillna  = True)
-            self.df[token + 'RSI'] = ta.momentum.rsi(self.candle_df[token + 'Close'], fillna  = True) - 50
+            self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
+            self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
 
 
     def save_data(self):
@@ -557,8 +551,8 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         in time can be captured by indexing that snapshot."""
         self.asset_data = None
 
-        self.fetch_data(start, end)
-        self.prepare_data()
+        self._fetch_data(start, end)
+        self._prepare_data()
         # n_step is number of samples, n_stock is number of assets. Assumes to datetimes are included
         self.n_step, n_features = self.asset_data.shape
 
@@ -746,23 +740,17 @@ class BittrexExchange(ExchangeEnvironment):
 
         self.asset_volumes = None
 
+        # self.state, self.cur_val = self.reset()
 
         self.print_account_health()
-
-        end = datetime.now()
-        start = end - timedelta(days = 1)
-        self.fetch_data(start, end)
-        self.prepare_data()
-
-        # self.state, self.cur_val = self.reset()
 
 
     def reset(self):
         # Resets the environement to the initial state
         end = datetime.now()
         start = end - timedelta(days = 1)
-        self.fetch_data(start, end)
-        self.prepare_data()
+        self._fetch_data(start, end)
+        self._prepare_data()
 
         self.cancel_all_orders()
         self.get_current_prices()
@@ -796,6 +784,7 @@ class BittrexExchange(ExchangeEnvironment):
               ult_row[1+2*i] -= penult_row[1+2*i]                # correcting each market's volume to be a delta
 
           state = ult_row.values
+
 
           return state
 
@@ -931,7 +920,7 @@ class BittrexExchange(ExchangeEnvironment):
                 if candle_dict['success']:
                     candle_df = self._process_candle_dict(candle_dict, market)
                     print("Success.")
-                    self.df.append(candle_df, sort = False)
+                    print(candle_df)
                     break
                 else: #If there is an error getting the proper data
                     print("Failed to get candle data. Candle dict: ", end = ' ')
@@ -994,14 +983,13 @@ class BittrexExchange(ExchangeEnvironment):
         self.get_current_prices()
 
         labels = ['Account Value', 'USD', *[x[4:7] for x in self.markets]]
-        info = [self._get_val(), self.USD, *self.assets_owned]
+        info = [self._get_val(), self.USD, *self.assets_owned] #does this work?
         df = pd.Series(info, index = labels)
 
         print(' ')
-        print('ACCOUNT INFO: ')
+        print('Account info: ')
         print(df)
         print(' ')
-
 
     def cancel_all_orders(self):
         """This method looks for any open orders associated with the account,
