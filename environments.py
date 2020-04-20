@@ -24,7 +24,7 @@ paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bit
 'secret': "/Users/biver/Documents/crypto_data/secrets.json",
 'rewards': 'agent_rewards',
 'models': 'agent_models',
-'order log': 'C:/Python Programs/crypto_trader/order logs/order_log',
+'order log': 'C:/Python Programs/crypto_trader/order logs/order_log.csv',
 'test trade log':  'C:/Python Programs/crypto_trader/order logs/trade_testingBTCUSD.csv'}
 
 
@@ -72,7 +72,8 @@ class ExchangeEnvironment:
         # calculate size of state (amount of each asset held, value of each asset, volumes, USD/cash, indicators for each asset)
         # self.state_dim = self.n_asset*3 + 1 + self.n_indicators*self.n_asset
         self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators #+ self.n_asset #price and volume, and then the indicators, then last state
-        self.action_list[0] #The action where nothing is owned
+        self.last_action = [] #The action where nothing is owned
+
 
         self.assets_owned = [0]*self.n_asset
         self.asset_prices = [0]*self.n_asset
@@ -80,6 +81,7 @@ class ExchangeEnvironment:
         self.USD = None
         self.df = None
         self.transformed_df = None
+        self.mean_spread = .0003 #fraction of the price to use as spread when placing limit orders
 
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
@@ -557,7 +559,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         # instance attributes
         self.initial_investment = initial_investment
         self.cur_step = None
-        self.mean_spread = .0005 #Fraction of asset value typical for the spread
 
         self.reset()
 
@@ -761,7 +762,7 @@ class BittrexExchange(ExchangeEnvironment):
         #     while not success:
         #         success = self._trade(-self.assets_owned[0])
 
-        return self._get_state(), self._return_val()
+        return self._get_state(), self._get_val()
 
 
     def _get_state(self):
@@ -863,7 +864,7 @@ class BittrexExchange(ExchangeEnvironment):
             """
 
 
-    def _return_val(self):
+    def _get_val(self):
         """ This method returns the current value of the account that the object
         is tied to in USD. VALIDTED"""
         try:
@@ -881,7 +882,7 @@ class BittrexExchange(ExchangeEnvironment):
 
         for i, market in enumerate(self.markets):
             token = market[4:7]
-            print('Fetching' + token + 'price... ', end = ' ')
+            print('Fetching ' + token + ' price... ', end = ' ')
             attempts_left = 3
             while True:
                 ticker = self.bittrex_obj_1_1.get_ticker(market)
@@ -925,9 +926,9 @@ class BittrexExchange(ExchangeEnvironment):
                     print("Failed to get candle data. Candle dict: ", end = ' ')
                     print(candle_dict)
                     time.sleep(2*attempts)
-                    attempts += 1
+                    attempts -= 1
 
-                    if attempts == 5:
+                    if attempts == 0:
                         print('Exceeded maximum number of attempts.')
                         raise(TypeError)
                     print('Retrying...')
@@ -982,10 +983,13 @@ class BittrexExchange(ExchangeEnvironment):
         self.get_current_prices()
 
         labels = ['Account Value', 'USD', *[x[4:7] for x in self.markets]]
-        info = [self._return_val(), self.USD, *self.assets_owned] #does this work?
+        info = [self._get_val(), self.USD, *self.assets_owned] #does this work?
         df = pd.Series(info, index = labels)
 
+        print(' ')
+        print('Account info: ')
         print(df)
+        print(' ')
 
 
     def cancel_all_orders(self):
@@ -1021,23 +1025,25 @@ class BittrexExchange(ExchangeEnvironment):
         # Enter a trade into the market.
         #The bittrex.bittrex buy_limit method takes 4 arguments: market, amount, rate
         # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
-        spread = .0002
+
         if amount > 0:  # buy
-            rate = round(self.asset_prices[0]*(1 + spread/2), 3)
+            rate = round(self.asset_prices[0]*(1 + self.mean_spread/2), 3)
             amount_currency = round(amount/rate, 4)
             coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
             order_entry_status = self.bittrex_obj_1_1.buy_limit(currency_pair, amount_currency, rate)
             side = 'buying'
         else:       # Sell
-            rate = round(self.asset_prices[0]*(1 - spread/2), 3)
+            rate = round(self.asset_prices[0]*(1 - self.mean_spread/2), 3)
             amount_currency = round(-amount/rate, 4)
             order_entry_status = self.bittrex_obj_1_1.sell_limit(currency_pair, amount_currency, rate)
             side = 'selling'
 
         # Check that an order was entered
         if not order_entry_status['success']:
-            print('Trade attempt failed: ', end = ' ')
+            print('Trade attempt for ' + side + ' failed: ', end = ' ')
             print(order_entry_status['message'])
+            if order_entry_status['message'] == 'INSUFFICIENT_FUNDS':
+                print('Amount: ' + str(amount))
             return False
         else: #order has been successfully entered to the exchange
             print(f'Order for {side} {amount_currency:.8f} {currency_pair[4:]} at a price of ${rate:.2f} has been submitted to the market.')
@@ -1050,8 +1056,7 @@ class BittrexExchange(ExchangeEnvironment):
             if order_is_filled == True:
                 print(f'Order has been filled. uuid: {uuid}.')
                 self.get_all_balances()        #updating with new amount of coin
-                print('You now have ' + str(self.assets_owned[coin_index]) + ' ' + str(currency_pair[4:]))
-
+                self.print_account_health()
             #this saves the information regardless of if the trade was successful or not
             self._get_and_save_order_data(uuid)
 
@@ -1126,8 +1131,8 @@ class BittrexExchange(ExchangeEnvironment):
         order_df.set_index('Opened', inplace = True, drop = True)
         print('fetched.')
 
-        print('ORDER INFO:')
-        print(order_df.columns)
+        # print('ORDER INFO:')
+        # print(order_df.columns)
 
         # #Load the trade log from csv
         #Note that the dateformat for this is different than for the price history.

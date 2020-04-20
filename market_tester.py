@@ -5,7 +5,9 @@ from datetime import datetime, timedelta
 import json
 
 env = BittrexExchange(money_to_use = 5)
-env.get_latest_candle(env.markets[0])
+print(env.action_list)
+env._act(1)
+# env.get_latest_candle(env.markets[0])
 # env._trade('USD-BTC', -5)
 # env.view_order_data()
 

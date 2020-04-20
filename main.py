@@ -24,9 +24,8 @@ from sklearn.preprocessing import StandardScaler
 """Whats Bruce working on?
 -why are all agents giving inconsistent test results?
 -mirror the datastructure of the sim env in the real env
--reformat the stationarity testing
 -trade logging (API will not return all trade history, limited by time).
--MAKE SURE THAT ohl IS GETTING stripped at the appropriate time/way so it doesnt affect 
+-MAKE SURE THAT ohl IS GETTING stripped at the appropriate time/way so it doesnt affect
 -Functional, automated trading
     -agent logging
     -get data handling integrated
