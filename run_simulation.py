@@ -4,16 +4,13 @@ from environments import *
 
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import numpy as np
 import argparse
 
 from datetime import datetime, timedelta
-import json
 import re
 import os
 import pickle
-import itertools
 import math
 import requests
 import urllib.request
@@ -22,56 +19,42 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
--why are all agents giving inconsistent test results?
--mirror the datastructure of the sim env in the real env
--MAKE SURE THAT ohl IS GETTING stripped at the appropriate time/way so it doesnt affect
--Functional, automated trading
-    -calculate the actual 'last_action' on inits
-    -agent logging
-    -test act
-    -make a 'live' function, I figure it should go for a day
-
+    -search features for optimal parameters
+    -train an agent!
+    -soometimes live agent gets caught in the sleep function
+    -make data scraping work better
+        -cum data shouldnt have download data
+        -enable data scraping to handle multiple currencies -- see dataframe.join method or maybe merge
 
 -Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -change feature engineering to better represent how feature engineering works in real time
 """
 
 """Whats sean working on?
--play one episode should be a part of sim env?
+    -Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
 
--Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
-
--enable data scraping to handle multiple currencies -- see dataframe.join method or maybe merge
-
--Better feature engineering (more features, different features, more, less, DERIVATIVES OF FEATURES OF MULTIPLE ORDERS)
-    -read up on technical analysis, 'indicators'
-
--look up hedge fund stucturing
-
--incorporate features into the environment classes (we want features to auto update when running in real time)
+    -Better feature engineering (more features, different features, more, less, DERIVATIVES OF FEATURES OF MULTIPLE ORDERS)
+        -read up on technical analysis, 'indicators'
+    -look up hedge fund stucturing
 """
-
 
 """OTHER FEATURES
--make granularity work with live
--make state reflect the percentage change instead of amount of change in price
--understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
--make _add_features also update the self.n_features
--fix an error in renko
+    -agent logging
+    -make granularity work with live
+    -make state reflect the percentage change instead of amount of change in price
+    -understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 
--incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
--be clear about episode/epoch terminology
--let the agent give two orders, a limit and stop
--model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
--fabricate simple data to train on to validate learning (why tho)
+    -incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
+    -be clear about episode/epoch terminology
+    -let the agent give two orders, a limit and stop
+    -model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
+    -fabricate simple data to train on to validate learning (why tho)
 
 Big Picture:
--Deep learning?
--Infrastructure :/ this is expensive and maybe impractical
--Trading multiple currencies
+    -Deep learning?
+    -Infrastructure :/ this is expensive and maybe impractical
+    -Trading multiple currencies
 """
-
-
 
 def maybe_make_dir(directory):
     if not os.path.exists(directory):
@@ -148,12 +131,39 @@ def play_one_episode(agent, env, scaler, is_train):
     return val
 
 
-def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-m', '--mode', type=str, required=True,
+                        help='either "train" or "test"')
+    args = parser.parse_args()
+    mode = args.mode
+    assert mode in ["train", "test", "run"]
+
+    if mode in ['train']:
+        #train
+
+        # start = datetime(2018, 3, 15)
+        # end = datetime(2018, 4, 1)
+        start = datetime.now() - timedelta(days = 9)
+        end = datetime.now()
+
+    elif mode == 'test':
+        # start = datetime(2019,12, 14)
+        # end = datetime(2019, 12, 28)
+
+        end = datetime.now()
+        start = end - timedelta(days = 9)
+
+        # start = datetime(2018, 3, 1)
+        # end = datetime(2018, 4, 1)
+
+
     # Mode should be a string, either train or test or run
     # maybe it would be helpful to run this through command line argv etc
 
-    models_folder = path_dict['models']
-    rewards_folder = path_dict['rewards']
+    models_folder = paths['models']
+    rewards_folder = paths['rewards']
 
     # maybe_make_dir(models_folder)
     # maybe_make_dir(rewards_folder)
@@ -167,9 +177,8 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
 
     batch_size = 32  # sampleing from replay memory
     initial_investment = 100
-
-    sim_env = SimulatedCryptoExchange(start_date, end_date, initial_investment)
-    # sim_env.save_data(path_dict)
+    sim_env = SimulatedCryptoExchange(start, end, initial_investment = initial_investment)
+    # sim_env.save_data()
     # print(sim_env.df.head())
 
     state_size = sim_env.state_dim
@@ -248,51 +257,3 @@ def run_agent_sim(mode, path_dict, start_date, end_date, num_episodes):
     print('Rewards saved.')
 
     plt.show()
-
-
-def run_agents_live(mode, start_date, end_date):
-    assert(mode == 'run')
-
-    #Prepare the agent
-
-    # make sure epsilon is not 1!
-    # Set to 0 for purely deterministic
-    if agent.name == 'dqn':
-        agent.epsilon = 0
-        # load the previous scaler
-        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-            scaler = pickle.load(f)
-
-        # load trained weights
-        agent.load(f'{models_folder}/linear.npz')
-
-
-if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', type=str, required=True,
-                        help='either "train" or "test"')
-    args = parser.parse_args()
-    mode = args.mode
-    assert mode in ["train", "test", "run"]
-
-    if mode in ['train']:
-        #train
-
-        # start = datetime(2018, 3, 15)
-        # end = datetime(2018, 4, 1)
-        start = datetime.now() - timedelta(days = 9)
-        end = datetime.now()
-
-    elif mode == 'test':
-        # start = datetime(2019,12, 14)
-        # end = datetime(2019, 12, 28)
-
-        end = datetime.now()
-        start = end - timedelta(days = 9)
-
-        # start = datetime(2018, 3, 1)
-        # end = datetime(2018, 4, 1)
-
-
-    run_agent_sim(mode, paths, start, end, 400)

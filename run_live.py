@@ -5,10 +5,22 @@ import pandas as pd
 from datetime import datetime, timedelta
 import json
 
+def roundTime(dt=None, roundTo=60):
+   """Round a datetime object to any time lapse in seconds
+   dt : datetime.datetime object, default now.
+   roundTo : Closest number of seconds to round to, default 1 minute.
+   Author: Thierry Husson 2012 - Use it as you want but don't blame me.
+   """
+   if dt == None : dt = datetime.datetime.now()
+   seconds = (dt.replace(tzinfo=None) - dt.min).seconds
+   rounding = (seconds+roundTo/2) // roundTo * roundTo
+   return dt + datetime.timedelta(0,rounding-seconds,-dt.microsecond)
+
+
 env = BittrexExchange()
 state = env.reset()
 # print(env.action_list)
-# env._act(0)
+# env.act(0)
 # env._trade('USD-BTC', -5)
 # env.view_order_data()
 # env.get_latest_candle(env.markets[0])
@@ -36,11 +48,19 @@ if agent.name == 'dqn':
     agent.load(f'{models_folder}/linear.npz')
 
 print('done.')
-print('Oohh wee, here I go trading again!')
+
+
+print('\n Oohh wee, here I go trading again! \n')
+
 start_time = datetime.now()
-counter = 10
-while datetime.now() < start_time + timedelta(hours = 10):
-    print(f'It is now {datetime.now() + timedelta(hours = 7)} on the Bittrex Servers.')
+loop_frequency = 60 #seconds
+counter = 0
+
+while datetime.now() < start_time + timedelta(hours = 24):
+    loop_start = datetime.now()
+    bittrex_time = roundTime(datetime.now() + timedelta(hours = 7))
+
+    print(f'It is now {} on the Bittrex Servers.')
     state = env.update() #This fetches data and preapres it, and also gets
     if agent.name == 'dqn':next_state = scaler.transform([next_state])
     action = agent.act(state)
@@ -48,14 +68,17 @@ while datetime.now() < start_time + timedelta(hours = 10):
     print(state)
     print('Predicted best action:', end = ' ')
     print(env.action_list[action])
+    # print(action)
     env.act(action)
-    if counter == 0: env.save_log()
-    else: counter -= 1
+    if counter == 0:
+        env.save_log()
+        counter = 0
+    else: counter += 1
 
-    sleep_time = 60*10 #in seconds
-    print(env.log)
-    print(f'Sleeping for {sleep_time} seconds.')
-    time.sleep(sleep_time)
+    sleep_time = timedelta(seconds = loop_frequency) - (datetime.now() - loop_start) #in seconds
+    # print(env.log)
+    print(f'Sleeping for {sleep_time.seconds} seconds.')
+    time.sleep(sleep_time.seconds)
 
 
 env.plot_market_data()

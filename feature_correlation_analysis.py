@@ -2,10 +2,10 @@ from environments import *
 from datetime import datetime, timedelta
 import pandas as pd
 
-start = datetime.now() - timedelta(days = 10)
+start = datetime.now() - timedelta(days = 3)
 end = datetime.now()
 
-last_time_scraped = datetime.now() - timedelta(days = 20)
+last_time_scraped = datetime.now() - timedelta(days = 3)
 
 sim_env = SimulatedCryptoExchange(start, end)
 

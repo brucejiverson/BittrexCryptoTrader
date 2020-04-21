@@ -88,7 +88,7 @@ class ExchangeEnvironment:
         self.spread = 0.995 #this is the one we're using to deal with 100% moves
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
-        log_columns = ['BTC', 'Total Value']
+        log_columns = ['$ of BTC', 'Total Value']
         self.log = pd.DataFrame(columns=log_columns)
 
 
@@ -128,12 +128,13 @@ class ExchangeEnvironment:
                 print('Fetching ' + market + ' historical data from the exchange.')
                 attempts = 0
                 while True:
-                    print('Fetching candles from Bittrex...', end = " ")
+                    print('Fetching candles from Bittrex... ', end = " ")
                     candle_dict = self.bittrex_obj_2.get_candles(market, 'oneMin')
 
                     if candle_dict['success']:
+                        # print(candle_dict)
                         candle_df = self._process_candle_dict(candle_dict, market)
-                        print("Success.")
+                        print("done.")
                         # print(candle_df.head())
                         break
                     else: #If there is an error getting the proper data
@@ -156,23 +157,23 @@ class ExchangeEnvironment:
 
         path = paths['cum data csv']
 
-        # if df.empty or df.index.min() > start_date:  # try to fetch from updated
-        #     print('Fetching data from cumulative data repository.')
-        #
-        #     def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-        #     up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
-        #
-        #     assert not up_df.empty
-        #     print('Success fetching from cumulative data repository.')
-        #     up_df.set_index('TimeStamp', drop = True, inplace = True)
-        #     # print(df.tail())
-        #     # print('CUM DATA DF:')
-        #     # print(up_df.head())
-        #     # print(up_df.tail())
-        #     df = df.append(up_df, sort = True)
-        #     # print('DATA INCL CUMULATIVE DATA REPOSITORY:')
-        #     # print(df.head())
-        #     # print(df.tail())
+        if df.empty or df.index.min() > start_date:  # try to fetch from updated
+            print('Fetching data from cumulative data repository.')
+
+            def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
+            up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+
+            assert not up_df.empty
+            print('Success fetching from cumulative data repository.')
+            up_df.set_index('TimeStamp', drop = True, inplace = True)
+            # print(df.tail())
+            # print('CUM DATA DF:')
+            # print(up_df.head())
+            # print(up_df.tail())
+            df = df.append(up_df, sort = True)
+            # print('DATA INCL CUMULATIVE DATA REPOSITORY:')
+            # print(df.head())
+            # print(df.tail())
 
         if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
 
@@ -207,9 +208,12 @@ class ExchangeEnvironment:
             #drop column if necessary
             if not market in self.markets: df.drop(columns=[col], inplace = True)
 
-        df = df.loc[df.index > start_date] #not the culprit in the altered gran
-        df = df.loc[df.index < end_date]
-
+        # print('Here is the most recent candle info I gathered: ')
+        # print(df.tail(1))
+        df = df.loc[df.index > start_date + timedelta(hours = 7)] #not the culprit in the altered gran
+        df = df.loc[df.index < end_date + timedelta(hours = 7)]
+        # print('Here is the most recent candle info in the candle df:')
+        # print(df.tail(1))
         self.candle_df = self._format_df(df) #completely resets the candle_df)
 
 
@@ -248,7 +252,7 @@ class ExchangeEnvironment:
                 if col in [token + 'Open', token + 'High', token + 'Low']:
                     self.df.drop(columns=[col], inplace = True)
 
-        print(self.df.head())
+        # print(self.df.head())
         #This is here before the stripped_df get made to be stationary
         self.asset_data = self.df.values #used in sim only
 
@@ -606,10 +610,10 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         # store the current value of the portfolio here
         cur_val = self._get_val()
-        btc_amt = self._get_btc()*self.asset_prices[0]
+        btc_amt = self.assets_owned[0]*self.asset_prices[0]
 
         if self.should_log:
-            row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':[datetime.now()+timedelta(hours=7)]})
+            row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':[datetime.now()+timedelta(hours=7)]})
             row.set_index('Timestamp', drop = True, inplace = True)
             self.log = self.log.append(row, sort = False)
 
@@ -632,10 +636,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
     def _get_val(self):
         return self.assets_owned.dot(self.asset_prices) + self.USD
-
-
-    def _get_btc(self):
-        return self.assets_owned[0]
 
 
     def _get_state(self):
@@ -670,7 +670,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                 # print(slice[0:n])
                 #BELOW IS THE OLD WAY OF DOING IT
                 n = self.n_asset*2 #price and volume
-                print(slice[0:n])
                 state[0:n] = slice[0:n] - last_slice[0:n] #simple differencing for price and volume
                 # state[0:n] = np.log(slice[0:n]) - np.log(last_slice[0:2]) #this is price and volume
 
@@ -780,10 +779,10 @@ class BittrexExchange(ExchangeEnvironment):
         self._prepare_data()
         self.get_all_balances()
 
-        print('Updating log...')
+        print('Updating log...', end = ' ')
         btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
         cur_val = btc_amt + self.USD
-        row = pd.DataFrame({'BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':datetime.now()+timedelta(hours=7)})
+        row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':datetime.now()+timedelta(hours=7)})
         row.set_index('Timestamp', drop = True, inplace = True)
         self.log = self.log.append(row, sort = False)
         print('Done')
@@ -812,16 +811,8 @@ class BittrexExchange(ExchangeEnvironment):
 
     def act(self, action):
         """
-        # index the action we want to perform
-        # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
-
-        action_vec = self.action_list[action] #a vectyor like [0.1, 0.5] own 0.1*val of BTC, 0.5*val of ETH etc.
-
-        if action_vec != self.last_action:  # if attmepting to change state
-
-        #THIS WILL NEED TO BE MORE COMPLEX IF MORE ASSETS ARE ADDED
-        #Calculate the changes needed for each asset
-        delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action)]
+        action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
+        action_vec = self.action_list[action] #a vector like [0.1, 0.5] own 0.1*val of BTC, 0.5*val of ETH etc.
         """
         #currently set up for only bitcoin
         # index the action we want to perform
@@ -831,16 +822,15 @@ class BittrexExchange(ExchangeEnvironment):
         action_vec = self.action_list[action]
 
         cur_price = self.asset_prices[0]
-        bid_price = cur_price*(1 - self.mean_spread/2)
-        ask_price = cur_price*(1 + self.mean_spread/2)
+        bid_price = cur_price*(1 - self.mean_spread/2)  #We sell at this value
+        ask_price = cur_price*(1 + self.mean_spread/2)  #We buy at this value
 
         cur_val = self._get_val()
-
 
         if action_vec != self.last_action:  # if attmepting to change state
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
-
+            print('Evaluating whether to buy or sell...')
             for i, a in enumerate(action_vec): #for selling assets (must happen first)
 
                 """
@@ -868,7 +858,6 @@ class BittrexExchange(ExchangeEnvironment):
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
             for i, a in enumerate(action_vec): #for buying assets
-
 
                 current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
                 currency_pair = self.markets[i]                         #which currency pair is being evaluated
@@ -1003,12 +992,13 @@ class BittrexExchange(ExchangeEnvironment):
         self.get_all_balances()
         self._get_current_prices()
 
-        labels = ['Account Value', 'USD', *[x[4:7] for x in self.markets]]
-        info = [self._get_val(), self.USD, *self.assets_owned] #does this work?
-        df = pd.Series(info, index = labels)
+        index = ['USD', *[x[4:7] for x in self.markets]]
+        dict = {'Amount of currency': [round(self.USD, 2), *self.assets_owned], 'Value in USD':  [round(self.USD, 2), *self.assets_owned*self.asset_prices]}
 
-        print(' ')
-        print('Account info: ')
+        df = pd.DataFrame(dict, index = index)
+
+        print('\nCURRENT ACCOUNT INFO:')
+        print(f'Total Account Value: {round(float(self._get_val()),2)}')
         print(df)
         print(' ')
 
@@ -1075,10 +1065,6 @@ class BittrexExchange(ExchangeEnvironment):
             order_entry_status = self.bittrex_obj_1_1.sell_limit(currency_pair, amount_currency, rate)
             side = 'selling'
 
-
-
-
-
         # Check that an order was entered
         if not order_entry_status['success']:
             print('Trade attempt for ' + side + ' failed: ', end = ' ')
@@ -1110,9 +1096,6 @@ class BittrexExchange(ExchangeEnvironment):
 
             #this saves the information regardless of if the trade was successful or not
             self._get_and_save_order_data(uuid)
-
-            return order_is_filled
-
 
     def _monitor_order_status(self, uuid, time_limit = 30):
         """This method loops for a maximum duration of timelimit seconds, checking the status of the open order uuid that is passed.
@@ -1227,12 +1210,20 @@ class BittrexExchange(ExchangeEnvironment):
         date_format = "%Y-%m-%d %I-%p-%M"
 
         #Load the old log
+        # try:
         def dateparse(x): return pd.datetime.strptime(x, date_format)
-        # df = pd.read_csv(path, parse_dates = ['Timestamp'], date_parser=dateparse)
-        # df.set_index('Timestamp', inplace = True, drop = True)
-        # df = df.append(self.log)
-        self.log.to_csv(path, index = True, index_label = 'Timestamp', date_format = date_format)
+
+        try:
+            df = pd.read_csv(path, parse_dates = ['Timestamp'], date_parser=dateparse)
+            df.set_index('Timestamp', inplace = True, drop = True)
+            df = df.append(self.log, sort = True)
+        except pd.errors.EmptyDataError:
+            print('There was no data in the log. Saving data generated during this run... ', end = ' ')
+            df = self.log
+        # except ValueError:
+        df.to_csv(path, index = True, index_label = 'Timestamp', date_format = date_format)
         print('done.')
+
 
     def get_and_save_order_history(self):
         """FOR NOW I AM LEAVING THIS INCOMPLETE. THE GET_ORDER METHOD RETRIEVE MORE INFORMATION ON
