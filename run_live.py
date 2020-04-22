@@ -14,7 +14,7 @@ def roundTime(dt=None, roundTo=60):
    if dt == None : dt = datetime.datetime.now()
    seconds = (dt.replace(tzinfo=None) - dt.min).seconds
    rounding = (seconds+roundTo/2) // roundTo * roundTo
-   return dt + datetime.timedelta(0,rounding-seconds,-dt.microsecond)
+   return dt + timedelta(0,rounding-seconds,-dt.microsecond)
 
 
 env = BittrexExchange()
@@ -60,7 +60,7 @@ while datetime.now() < start_time + timedelta(hours = 24):
     loop_start = datetime.now()
     bittrex_time = roundTime(datetime.now() + timedelta(hours = 7))
 
-    print(f'It is now {} on the Bittrex Servers.')
+    print(f'It is now {bittrex_time} on the Bittrex Servers.')
     state = env.update() #This fetches data and preapres it, and also gets
     if agent.name == 'dqn':next_state = scaler.transform([next_state])
     action = agent.act(state)

@@ -53,7 +53,7 @@ class ExchangeEnvironment:
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
 
-        self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
+        self.n_indicators = 5 #This HAS to match the number of features that have been created in the add features thing
 
         portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
         # The possible portions of the portfolio that could be allocated to a single asset
@@ -84,7 +84,7 @@ class ExchangeEnvironment:
         self.candle_df = None
         self.transformed_df = None
         self.asset_data = None
-        self.mean_spread = .0003 #fraction of the price to use as spread when placing limit orders
+        self.mean_spread = .0002 #fraction of the price to use as spread when placing limit orders
         self.spread = 0.995 #this is the one we're using to deal with 100% moves
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
@@ -238,48 +238,19 @@ class ExchangeEnvironment:
         """This method takes the raw candle data and constructs features, changes granularity, etc.
         Typically called in the init method"""
 
-        # df = self._change_df_granularity(10)
 
         self.df = self.candle_df.copy()
-        self._add_features_to_df()
-
-        df_cols = self.df.columns
-
-        # Strip out open high low close
-        for market in self.markets:
-            token = market[4:7]
-            for col in df_cols:
-                if col in [token + 'Open', token + 'High', token + 'Low']:
-                    self.df.drop(columns=[col], inplace = True)
-
-        # print(self.df.head())
-        #This is here before the stripped_df get made to be stationary
-        self.asset_data = self.df.values #used in sim only
+        self._change_df_granularity(10)
 
 
-    def _change_df_granularity(self, gran):
-        """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes).
-        This could possibly be imporved in the future with the ".resample()" method."""
-
-        print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
-
-        # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
-        self.df =  self.df.iloc[::gran, :]
-        self.df = self._format_df(self.df)
-        # print(input_df.head())
-        # else:
-        #     print('Granularity of df input to change_df_granularity was not 1 minute.')
-        #     raise(ValueError)
-        #     return input_df
-
-    def _add_features_to_df(self, renko_block = 40):
+        #This section constructs engineered features and adds them as columns to the df
         """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
 
-        print('Constructing features...')
+        print('Constructing features... ', end = ' ')
 
-        def add_sma_as_column(mydata, token, p):
+        def add_sma_as_column(token, p):
             # p is a number
-            price = mydata[token + 'Close'].values  # returns an np price, faster
+            price = self.df[token + 'Close'].values  # returns an np price, faster
 
             sma = np.empty_like(price)
             for i, item in enumerate(np.nditer(price)):
@@ -290,13 +261,9 @@ class ExchangeEnvironment:
                 else:
                     sma[i] = price[(i - p):i].mean()
 
-            # subtract
-            indicator = np.empty_like(sma)
-            for i, item in enumerate(np.nditer(price)):
-                indicator[i] = sma[i] - price[i]
-
-            mydata['SMA_' + str(p)] = indicator  # modifies the input df
-
+            col_name = 'SMA_' + str(p)
+            self.df[col_name] = sma  # modifies the input df
+            self.df[col_name] = self.df[col_name] - self.df[token + 'Close'].shift(1)
 
         def add_renko(blocksize, token):
             #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
@@ -380,15 +347,7 @@ class ExchangeEnvironment:
                     # print("SENTIMENT VECTOR: : ")
                     # print(sentiment)
                     mydata['Sentiment'] = sentiment
-
-        # base = 50
-        # add_sma_as_column(input_df, base)
-        # add_sma_as_column(input_df, int(base*8/5))
-        # add_sma_as_column(input_df, int(base*13/5))
-        # add_sentiment(input_df)
-
-        # add_renko(renko_block)
-
+        print(self.df.head())
         for market in self.markets:
             token = market[4:7] #this is something like 'BTC' or 'ETH'
 
@@ -396,6 +355,44 @@ class ExchangeEnvironment:
             self.df[token + 'OBV'] = self.df[token + 'OBV'] - self.df[token + 'OBV'].shift(1)
             self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
             self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
+            base = 50
+            add_sma_as_column(token, base)
+            add_sma_as_column(token, int(base*8/5))
+            add_sma_as_column(token, int(base*13/5))
+            # add_sentiment(input_df)
+
+            # add_renko(renko_block)
+        print('done.')
+
+
+        df_cols = self.df.columns
+
+        # Strip out open high low close
+        for market in self.markets:
+            token = market[4:7]
+            for col in df_cols:
+                if col in [token + 'Open', token + 'High', token + 'Low']:
+                    self.df.drop(columns=[col], inplace = True)
+
+        # print(self.df.head())
+        #This is here before the stripped_df get made to be stationary
+        self.asset_data = self.df.values #used in sim only
+
+
+    def _change_df_granularity(self, gran):
+        """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes).
+        This could possibly be imporved in the future with the ".resample()" method."""
+
+        print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
+
+        # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
+        self.df =  self.df.iloc[::gran, :]
+        self.df = self._format_df(self.df)
+        # print(input_df.head())
+        # else:
+        #     print('Granularity of df input to change_df_granularity was not 1 minute.')
+        #     raise(ValueError)
+        #     return input_df
 
 
     def save_data(self):
@@ -501,7 +498,7 @@ class ExchangeEnvironment:
         print(f'Sharpe Ratio: {sharpe}') #one or better is good
 
         self.log.plot(y='Total Value', ax=ax2)
-        # self.log.plot(y='BTC', ax = ax2)            # !!! not formatted to work with multiple coins
+        self.log.plot(y='$ of BTC', ax = ax2)            # !!! not formatted to work with multiple coins
         fig.autofmt_xdate()
 
 
@@ -551,7 +548,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         print(self.candle_df.head())
         print(self.candle_df.tail())
         self._prepare_data() #This fills in the asset_data array
-        self._change_df_granularity(10)
         print('PREPARED DATA:')
         print(self.df.head())
         print(self.df.tail())
@@ -704,6 +700,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
 
         if action_vec != self.last_action:  # if attmepting to change state
+
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
 
@@ -717,14 +714,40 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
             # Buy back the right amounts
             for i, a in enumerate(action_vec):
                 cash_to_use = a * self.USD
-                self.assets_owned[i] = cash_to_use / self.asset_prices[i]
+                self.assets_owned[i] = cash_to_use / ask_price
                 self.USD -= cash_to_use
 
 
             # print("Initial val: " + str(cur_val) + ". Post trade val:" + str(self._get_val()))
             self.last_action = action_vec
             self.period_since_trade = 0
+            """
+            # print('Evaluating whether to buy or sell...')
+            for i, a in enumerate(action_vec): #for selling assets (must happen first)
 
+                current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
+                currency_pair = self.markets[i]                         #which currency pair is being evaluated
+                decimal_diff = a - current_holding                      #want minus have
+                threshhold = 0.05                                       #trades only executed if difference between want and have is sufficiently high enough
+
+
+                if -decimal_diff > threshhold:                          #sell if decimal_diff is sufficiently negative
+                    # print("Aw jeez, I've got " + str(round(-decimal_diff*100,2)) + "% too much of my portfolio in " + str(currency_pair[4:]))
+                    trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD, formatted to be neg for _trade logic
+                    self.USD -+ trade_amount
+                    self.assets_owned[i] += trade_amount/self.asset_prices[i] #bid_price
+
+            for i, a in enumerate(action_vec): #for buying assets
+                current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
+                currency_pair = self.markets[i]                         #which currency pair is being evaluated
+                decimal_diff = a - current_holding                      #want minus have
+                threshhold = 0.05                                       #trades only executed if difference between want and have is sufficiently high enough
+
+                if decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
+                    # print("Oh boy, time to spend " + str(round(decimal_diff*100,2)) + "% of my portfolio on " + str(currency_pair[4:]))
+                    trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
+                    self.USD -+ trade_amount
+                    self.assets_owned[i] += trade_amount/self.asset_prices[i] #ask_price"""
 
 class BittrexExchange(ExchangeEnvironment):
     """This class provides an interface with the Bittrex exchange for any and all operations. It inherites from the 'ExchangeEnvironment

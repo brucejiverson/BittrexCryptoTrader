@@ -23,7 +23,7 @@ class LinearModel:
         assert(len(X.shape) == 2)
         return X.dot(self.W) + self.b
 
-    def sgd(self, X, Y, learning_rate=0.01, momentum=0.5):
+    def sgd(self, X, Y, learning_rate=0.0025, momentum=0.4):
         """One step of gradient descent.
         learning rate was originally 0.01
         u = momentum term
@@ -156,7 +156,9 @@ class SimpleAgent():
         # if macd > 0 and rsi < -1: # 8.7% over 10 days [0,0]
         # if obv < 0: #[-.1] 10.22% [-.5] 9.35% better downdraw. [-1] 8.1% no downdraw 10 days.
         # if obv < -.5 and macd > 0 and rsi < -2:
-        if macd > 0 and rsi < -2: #this is one of the best ones I have found at giving good profits while limiting downdraw
+        # if macd > 2.5 and rsi < -4: #this is one of the best ones I have found at giving good profits while limiting downdraw
+        # if abs(obv) > 8:
+        if obv < -4:
             return 1
         else: #sell
             return 0

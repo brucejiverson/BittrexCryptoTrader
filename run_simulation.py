@@ -26,13 +26,14 @@ from sklearn.preprocessing import StandardScaler
         -cum data shouldnt have download data
         -enable data scraping to handle multiple currencies -- see dataframe.join method or maybe merge
 
--Fixed simulated env trading (compare the old way of doing it and validate that the results are the same)
 -change feature engineering to better represent how feature engineering works in real time
 """
 
 """Whats sean working on?
+    -make state reflect the percentage change instead of amount of change in price
+    -mirror act logic in simulation, mirror bid/ask
     -Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
-
+    -convert onemin candle to larger granularity size
     -Better feature engineering (more features, different features, more, less, DERIVATIVES OF FEATURES OF MULTIPLE ORDERS)
         -read up on technical analysis, 'indicators'
     -look up hedge fund stucturing
@@ -42,13 +43,11 @@ from sklearn.preprocessing import StandardScaler
     -agent logging
     -make granularity work with live
     -make state reflect the percentage change instead of amount of change in price
-    -understand pass by reference object well, and make sure that I am doing it right. I think this may be why the code is so slow
 
     -incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
     -be clear about episode/epoch terminology
     -let the agent give two orders, a limit and stop
     -model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
-    -fabricate simple data to train on to validate learning (why tho)
 
 Big Picture:
     -Deep learning?
@@ -140,30 +139,30 @@ if __name__ == '__main__':
     mode = args.mode
     assert mode in ["train", "test", "run"]
 
+    models_folder = paths['models']
+    rewards_folder = paths['rewards']
+
     if mode in ['train']:
         #train
 
         # start = datetime(2018, 3, 15)
         # end = datetime(2018, 4, 1)
         start = datetime.now() - timedelta(days = 9)
-        end = datetime.now()
+        end = datetime.now() - timedelta(days = 4)
+        num_episodes = 500
 
     elif mode == 'test':
+        print('Testing...')
         # start = datetime(2019,12, 14)
         # end = datetime(2019, 12, 28)
 
         end = datetime.now()
-        start = end - timedelta(days = 9)
-
+        start = end - timedelta(days = 1)
+        num_episodes = 3
         # start = datetime(2018, 3, 1)
         # end = datetime(2018, 4, 1)
 
-
-    # Mode should be a string, either train or test or run
-    # maybe it would be helpful to run this through command line argv etc
-
-    models_folder = paths['models']
-    rewards_folder = paths['rewards']
+        num_episodes = 5
 
     # maybe_make_dir(models_folder)
     # maybe_make_dir(rewards_folder)
@@ -184,25 +183,22 @@ if __name__ == '__main__':
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
 
-    # agent = DQNAgent(state_size, action_size)
-    agent = SimpleAgent(state_size, action_size)
+    agent = DQNAgent(state_size, action_size)
+    # agent = SimpleAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)
 
-    if mode == 'test':
-        print('Testing...')
-        num_episodes = 5
-        if agent.name == 'dqn':
-            # then load the previous scaler
-            with open(f'{models_folder}/scaler.pkl', 'rb') as f:
-                my_scaler = pickle.load(f)
+    if agent.name == 'dqn' and mode == 'test':
+        # then load the previous scaler
+        with open(f'{models_folder}/scaler.pkl', 'rb') as f:
+            my_scaler = pickle.load(f)
 
-            # make sure epsilon is not 1!
-            # no need to run multiple episodes if epsilon = 0, it's deterministic
-            agent.epsilon_min = 0.00#1
-            agent.epsilon = agent.epsilon_min
+        # make sure epsilon is not 1!
+        # no need to run multiple episodes if epsilon = 0, it's deterministic
+        agent.epsilon_min = 0.00#1
+        agent.epsilon = agent.epsilon_min
 
-            # load trained weights
-            agent.load(f'{models_folder}/linear.npz')
+        # load trained weights
+        agent.load(f'{models_folder}/linear.npz')
 
     time_remaining = timedelta(hours=0)
     #Print out some info about the assets
