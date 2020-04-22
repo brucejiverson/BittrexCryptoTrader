@@ -164,7 +164,6 @@ class SimpleAgent():
             return 0
 
 
-
 class BenchMarker:
     """For now, this just uses the Renko strategy. Eventually,
     this should take in a string parameter that dictates which

@@ -240,7 +240,7 @@ class ExchangeEnvironment:
 
 
         self.df = self.candle_df.copy()
-        self._change_df_granularity(10)
+        # self._change_df_granularity(10)
 
 
         #This section constructs engineered features and adds them as columns to the df
@@ -619,7 +619,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
             Arithmetic ROI would show an overall trend of 0%, but log ROI properly computes this to be -1%"""
             return round(np.log(final/initial), 4) *100
 
-
         reward = log_ROI(prev_val, cur_val)#(cur_val - prev_val) #this used to be more complicated
 
         # done if we have run out of data
@@ -748,6 +747,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                     trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
                     self.USD -+ trade_amount
                     self.assets_owned[i] += trade_amount/self.asset_prices[i] #ask_price"""
+
 
 class BittrexExchange(ExchangeEnvironment):
     """This class provides an interface with the Bittrex exchange for any and all operations. It inherites from the 'ExchangeEnvironment

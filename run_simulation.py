@@ -12,13 +12,15 @@ import re
 import os
 import pickle
 import math
-import requests
 import urllib.request
 
 from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
+    - make live df state pull from last price and not candlestick
+    -analyze order log
+    -
     -search features for optimal parameters
     -train an agent!
     -soometimes live agent gets caught in the sleep function

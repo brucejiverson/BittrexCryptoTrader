@@ -14,8 +14,8 @@ df['Future Percent Change'] = 100*(df['BTCClose'].shift(1) - df['BTCClose'])/df[
 df['Last Percent Change'] = df['Future Percent Change'].shift(-1)
 print(df.tail())
 fig, ax = plt.subplots(1, 1)  # Create the figure
-feat1_name = 'SMA_130'
-feat2_name = 'SMA_50'
+feat1_name = 'SMA_80'
+feat2_name = 'BTCRSI'
 df[df['Future Percent Change'] > .05].plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'b')
 df[df['Future Percent Change'] < .05].plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'r')
 # for param in [30]:
