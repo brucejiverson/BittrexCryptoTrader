@@ -18,7 +18,8 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
-    - make live df state pull from last price and not candlestick
+    -fix remove_data
+    -make live df state pull from last price and not candlestick
     -analyze order log
     -
     -search features for optimal parameters
@@ -159,12 +160,10 @@ if __name__ == '__main__':
         # end = datetime(2019, 12, 28)
 
         end = datetime.now()
-        start = end - timedelta(days = 1)
-        num_episodes = 3
+        start = end - timedelta(days = 9)
+        num_episodes = 1
         # start = datetime(2018, 3, 1)
         # end = datetime(2018, 4, 1)
-
-        num_episodes = 5
 
     # maybe_make_dir(models_folder)
     # maybe_make_dir(rewards_folder)
@@ -185,7 +184,8 @@ if __name__ == '__main__':
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
 
-    agent = DQNAgent(state_size, action_size)
+    agent = RegressionAgent(state_size, action_size)
+    # agent = DQNAgent(state_size, action_size)
     # agent = SimpleAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)
 

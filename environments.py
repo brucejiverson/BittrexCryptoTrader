@@ -52,8 +52,9 @@ class ExchangeEnvironment:
 
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
+        self.granularity = 1 #minutes
 
-        self.n_indicators = 5 #This HAS to match the number of features that have been created in the add features thing
+        self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
 
         portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
         # The possible portions of the portfolio that could be allocated to a single asset
@@ -84,7 +85,7 @@ class ExchangeEnvironment:
         self.candle_df = None
         self.transformed_df = None
         self.asset_data = None
-        self.mean_spread = .0002 #fraction of the price to use as spread when placing limit orders
+        self.mean_spread = .00015 #fraction of the price to use as spread when placing limit orders
         self.spread = 0.995 #this is the one we're using to deal with 100% moves
         # log_columns = [*[x for x in self.markets], 'Value']
         self.should_log = False
@@ -120,7 +121,7 @@ class ExchangeEnvironment:
             for item in ['Open', 'High', 'Low', 'Close', 'Volume']:
                 cols.append(market[4:7] + item)
 
-        df = pd.DataFrame(columns=cols)
+        df = pd.DataFrame()#columns=cols)
 
         # Fetch candle data from bittrex for each market
         if end_date > datetime.now() - timedelta(days=9):
@@ -148,11 +149,11 @@ class ExchangeEnvironment:
                             raise(TypeError)
                             print('Retrying...')
                             #The below logic is to handle joinging data from multiple currencies
-                if i == 0: test = df.append(candle_df, sort = True)
-                else: test = df.join(candle_df)
+                if i == 0: df = df.append(candle_df, sort = True)
+                else: df = pd.concat([df, candle_df], axis = 1)
                 # print('CANDLE DF:')
                 # print(candle_df.tail())
-                df = df.append(candle_df, sort = True) #ok this works
+                # df = df.append(candle_df, sort = True) #ok this works
                 # print(df.tail())
 
         path = paths['cum data csv']
@@ -263,7 +264,7 @@ class ExchangeEnvironment:
 
             col_name = 'SMA_' + str(p)
             self.df[col_name] = sma  # modifies the input df
-            self.df[col_name] = self.df[col_name] - self.df[token + 'Close'].shift(1)
+            self.df[col_name] = self.df[col_name] - self.df[token + 'Close']
 
         def add_renko(blocksize, token):
             #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
@@ -306,7 +307,6 @@ class ExchangeEnvironment:
 
             self.df['Renko'] = renko
 
-
         def add_sentiment(mydata):
             """This function pulls sentiment data from the crypto fear and greed index. That data is updated daily.
             This is the link to the website: https://alternative.me/crypto/fear-and-greed-index/#fng-history
@@ -347,18 +347,29 @@ class ExchangeEnvironment:
                     # print("SENTIMENT VECTOR: : ")
                     # print(sentiment)
                     mydata['Sentiment'] = sentiment
-        print(self.df.head())
+
+        def discrete_derivative(col_name):
+            # self.df['d/dt_' + col_name] = (self.df[col_name].shift(-1, fill_value = 0) - self.df[col_name].shift(1, fill_value = 0))/(2*self.granularity) #this is a centered derivative
+            # self.df['d/dt_' + col_name].iloc[-1] = self.df[col_name][-2] - self.df[col_name][-1])/self.granularity  #Fill in the last value
+            self.df['d/dt_' + col_name] = (self.df[col_name] - self.df[col_name].shift(1))/self.granularity  #I used a non centered derivative because in real time this is the best we can do
+
+        # print(self.df.head())
+
+        #Add the features to the df
         for market in self.markets:
             token = market[4:7] #this is something like 'BTC' or 'ETH'
 
             self.df[token + 'OBV'] = ta.volume.on_balance_volume(self.df[token + 'Close'], self.df[token + 'Volume'], fillna  = True)
             self.df[token + 'OBV'] = self.df[token + 'OBV'] - self.df[token + 'OBV'].shift(1)
-            self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
-            self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
-            base = 50
+            # self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
+            # self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
+            base = 60
             add_sma_as_column(token, base)
-            add_sma_as_column(token, int(base*8/5))
-            add_sma_as_column(token, int(base*13/5))
+            # add_sma_as_column(token, int(base*8/5))
+            # add_sma_as_column(token, int(base*13/5))
+            discrete_derivative('SMA_' + str(base))
+            # discrete_derivative('SMA_' + str(int(base*8/5)))
+
             # add_sentiment(input_df)
 
             # add_renko(renko_block)
@@ -375,7 +386,6 @@ class ExchangeEnvironment:
                     self.df.drop(columns=[col], inplace = True)
 
         # print(self.df.head())
-        #This is here before the stripped_df get made to be stationary
         self.asset_data = self.df.values #used in sim only
 
 
@@ -388,6 +398,7 @@ class ExchangeEnvironment:
         # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
         self.df =  self.df.iloc[::gran, :]
         self.df = self._format_df(self.df)
+        self.granularity = gran
         # print(input_df.head())
         # else:
         #     print('Granularity of df input to change_df_granularity was not 1 minute.')
@@ -483,6 +494,32 @@ class ExchangeEnvironment:
         """
         # print(self.log.head())
 
+        # # def live_plotter(x_vec,y1_data,line1,identifier='',pause_time=0.1):
+        # if self.should_log:
+        #     # this is the call to matplotlib that allows dynamic plotting
+        #     plt.ion()
+        #     fig = plt.figure(figsize=(13,6))
+        #     ax = fig.add_subplot(111)
+        #     # create a variable for the line so we can later update it
+        #     line1, = ax.plot(x_vec,y1_data,'-o',alpha=0.8)
+        #     #update plot label/title
+        #     plt.ylabel('Y Label')
+        #     plt.title('Title: {}'.format(identifier))
+        #     plt.show()
+        #
+        # # after the figure, axis, and line are created, we only need to update the y-data
+        # line1.set_ydata(y1_data)
+        # # adjust limits if new data goes beyond bounds
+        # if np.min(y1_data)<=line1.axes.get_ylim()[0] or np.max(y1_data)>=line1.axes.get_ylim()[1]:
+        #     plt.ylim([np.min(y1_data)-np.std(y1_data),np.max(y1_data)+np.std(y1_data)])
+        # # this pauses the data so the figure/axis can catch up - the amount of pause can be altered above
+        # plt.pause(pause_time)
+        #
+        # # return line so we can update it again in the next iteration
+        # return line1
+
+
+        #Below is old code
         assert not self.log.empty
         fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
 
@@ -498,7 +535,7 @@ class ExchangeEnvironment:
         print(f'Sharpe Ratio: {sharpe}') #one or better is good
 
         self.log.plot(y='Total Value', ax=ax2)
-        self.log.plot(y='$ of BTC', ax = ax2)            # !!! not formatted to work with multiple coins
+        # self.log.plot(y='$ of BTC', ax = ax2)            # !!! not formatted to work with multiple coins
         fig.autofmt_xdate()
 
 
@@ -536,7 +573,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
       - associated indicators for each asset
     """
 
-    def __init__(self, start, end, initial_investment=100):
+    def __init__(self, start = datetime.now() - timedelta(days = 9), end = datetime.now(), initial_investment=100):
         ExchangeEnvironment.__init__(self)
 
         """The data, for asset_data can be thought of as nested arrays, where indexing the

@@ -1,5 +1,7 @@
 import numpy as np
 import warnings
+from environments import paths
+import pickle
 
 
 
@@ -72,7 +74,7 @@ class LinearModel:
         self.b = npz['b']
 
     def save_weights(self, filepath):
-        np.savez(filepath, W=self.W, b=self.b)  #didnt check cause I know I didnt change
+        np.savez(filepath, W=self.W, b=self.b)
 
 
 class DQNAgent(object):
@@ -135,7 +137,7 @@ class SimpleAgent():
 
     def __init__(self, state_size, action_size):    #same
 
-        self.name = 'rsi'
+        self.name = 'simple'
         # These two correspond to number of inputs and outputs of the neural network respectively
         self.state_size = state_size
         self.action_size = action_size
@@ -163,6 +165,38 @@ class SimpleAgent():
         else: #sell
             return 0
 
+
+class RegressionAgent():
+
+    def __init__(self, state_size, action_size):    #same
+
+        self.name = 'linear_regression'
+        # These two correspond to number of inputs and outputs of the neural network respectively
+        self.state_size = state_size
+        self.action_size = action_size
+
+        self.n_feat = self.state_size
+
+        #Load the weights
+        path = paths['models'] + '/regression.pkl'
+        with open(path, 'rb') as file:
+            self.model = pickle.load(file)
+
+    def act(self, state):
+        features = state[-self.n_feat::].reshape((1, self.n_feat))
+        # print(state)
+        # print(features)
+        y_pred = self.model.predict(features) #predicted percentage change
+        if y_pred > .075: return 1
+        else: return 0
+
+    # def train(self):
+
+    def save_weights(self):
+        #Save the weights
+        path = paths['models'] + '/regression.pkl'
+        with open(path, 'wb') as file:
+            pickle.dump(model, file)
 
 class BenchMarker:
     """For now, this just uses the Renko strategy. Eventually,

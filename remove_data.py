@@ -1,4 +1,4 @@
-from main import *
+from environments import *
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -12,37 +12,34 @@ import pandas as pd
 start = datetime(2017, 1, 1)
 end = datetime.now()
 
+path = paths['cum data csv']
 
+# datetimes to strings
+print('Fetching data from the download file...', end = ' ')
+# get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
 
-#get my keys
-with open(paths['secret']) as secrets_file:
-    keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
-    secrets_file.close()
+def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+orig_df = pd.read_csv(paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
 
-my_bittrex = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
+name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
+orig_df.rename(columns= name_map, inplace=True)
+orig_df.set_index('Timestamp', inplace = True, drop = True)
+print('Fetched.')
+df_to_save = self.df.append(orig_df, sort = True)
 
-market = symbols[3:6] + '-' + symbols[0:3]
+#Drop features and indicators, all non savable data
+for col in df_to_save.columns:
+    if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        df_to_save.drop(col, axis = 1, inplace = True)
 
-df = fetch_historical_data(paths, market, start, end, my_bittrex)  #gets all data
-df = df[df['Date'] >= start]
-df = df[df['Date'] <= end]
-df = format_df(df)
+df_to_save = self._format_df(df_to_save)
 
-
-print('Writing data to CSV.')
-
-path = paths['updated history']
-# must create new df as df is passed by reference
-# # datetimes to strings
-
-df_to_save = df
-df_to_save['Date'] = df_to_save['Date'].dt.strftime("%Y-%m-%d %I-%p-%M")
-
-df_to_save.to_csv(path, index=False)
+# df_to_save = filter_error_from_download_data(df_to_save)
+df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
 
 # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
 print('Data written.')
-
 
 print('Historical data has been fetched, filtered by date, and resaved.')
 
