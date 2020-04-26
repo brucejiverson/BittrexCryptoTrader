@@ -54,9 +54,9 @@ class ExchangeEnvironment:
         self.n_asset = len(self.markets)
         self.granularity = 1 #minutes
 
-        self.n_indicators = 3 #This HAS to match the number of features that have been created in the add features thing
+        self.n_indicators = 7 #This HAS to match the number of features that have been created in the add features thing
 
-        portfolio_granularity = 1  # smallest fraction of portfolio for investment in single asset (.01 to 1)
+        portfolio_granularity = 1  # EMAllest fraction of portfolio for investment in single asset (.01 to 1)
         # The possible portions of the portfolio that could be allocated to a single asset
         possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
         # calculate all possible allocations of wealth across the available assets
@@ -85,9 +85,8 @@ class ExchangeEnvironment:
         self.candle_df = None
         self.transformed_df = None
         self.asset_data = None
-        self.mean_spread = .00015 #fraction of the price to use as spread when placing limit orders
-        self.spread = 0.995 #this is the one we're using to deal with 100% moves
-        # log_columns = [*[x for x in self.markets], 'Value']
+        self.mean_spread = .0000 #fraction of the price to use as spread when placing limit orders
+        # log_columns = [*[x for x in self.markets], 'Total Value']
         self.should_log = False
         log_columns = ['$ of BTC', 'Total Value']
         self.log = pd.DataFrame(columns=log_columns)
@@ -241,29 +240,29 @@ class ExchangeEnvironment:
 
 
         self.df = self.candle_df.copy()
-        # self._change_df_granularity(10)
-
+        self._change_df_granularity(2)
 
         #This section constructs engineered features and adds them as columns to the df
         """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
 
         print('Constructing features... ', end = ' ')
 
-        def add_sma_as_column(token, p):
+        def add_EMA_as_column(token, p):
             # p is a number
             price = self.df[token + 'Close'].values  # returns an np price, faster
 
-            sma = np.empty_like(price)
+            ema = np.empty_like(price)
+            k = 2/(p - 1)
             for i, item in enumerate(np.nditer(price)):
                 if i == 0:
-                    sma[i] = item
-                elif i < p:
-                    sma[i] = price[0:i].mean()
+                    ema[i] = item
+                elif i < p: #EMA
+                    ema[i] = price[0:i].mean()
                 else:
-                    sma[i] = price[(i - p):i].mean()
+                    ema[i] = price[i]*k + ema[i-1]*(1- k) #price[(i - p):i].mean()
 
-            col_name = 'SMA_' + str(p)
-            self.df[col_name] = sma  # modifies the input df
+            col_name = 'EMA_' + str(p)
+            self.df[col_name] = ema  # modifies the input df
             self.df[col_name] = self.df[col_name] - self.df[token + 'Close']
 
         def add_renko(blocksize, token):
@@ -363,12 +362,13 @@ class ExchangeEnvironment:
             self.df[token + 'OBV'] = self.df[token + 'OBV'] - self.df[token + 'OBV'].shift(1)
             # self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
             # self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
-            base = 60
-            add_sma_as_column(token, base)
-            # add_sma_as_column(token, int(base*8/5))
-            # add_sma_as_column(token, int(base*13/5))
-            discrete_derivative('SMA_' + str(base))
-            # discrete_derivative('SMA_' + str(int(base*8/5)))
+            base = 80
+            add_EMA_as_column(token, base)
+            add_EMA_as_column(token, int(base*8/3))
+            add_EMA_as_column(token, int(base*13/3))
+            discrete_derivative('EMA_' + str(base))
+            discrete_derivative('EMA_' + str(int(base*8/3)))
+            discrete_derivative('EMA_' + str(int(base*13/3)))
 
             # add_sentiment(input_df)
 
@@ -385,6 +385,8 @@ class ExchangeEnvironment:
                 if col in [token + 'Open', token + 'High', token + 'Low']:
                     self.df.drop(columns=[col], inplace = True)
 
+        # self._change_df_granularity(5)
+
         # print(self.df.head())
         self.asset_data = self.df.values #used in sim only
 
@@ -396,14 +398,30 @@ class ExchangeEnvironment:
         print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
 
         # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
+        # n_row, n_col = self.candle_df.shape
+        # df = pd.DataFrame()
+        # for i in range(int(n_row/gran)):
+        #     slice = self.candle_df.iloc[i*gran:(i+1)*gran]
+        #     open = slice['BTCOpen'].iloc[0]
+        #     high = slice['BTCHigh'].max()
+        #     low = slice['BTCLow'].min()
+        #     close = slice['BTCClose'].iloc[-1]
+        #     volume = slice['BTCVolume'].sum()
+        #     timestamp = slice.iloc[-1].name
+        #     candle = pd.DataFrame({'BTCOpen': close, 'BTCHigh': high, 'BTCLow': low, 'BTCClose': close, 'BTCVolume': volume}, index = [timestamp])
+        #     # print(candle)
+        #     # candle.set_index('Timestamp', inplace = True, drop = True)
+        #     df = df.append(candle)
+        #
+        # print(df.head())
+        # self.df = df
+        self.granularity = gran
         self.df =  self.df.iloc[::gran, :]
         self.df = self._format_df(self.df)
-        self.granularity = gran
-        # print(input_df.head())
         # else:
-        #     print('Granularity of df input to change_df_granularity was not 1 minute.')
-        #     raise(ValueError)
-        #     return input_df
+            # print('Granularity of df input to change_df_granularity was not 1 minute.')
+            # raise(ValueError)
+            # return input_df
 
 
     def save_data(self):
@@ -522,13 +540,14 @@ class ExchangeEnvironment:
         #Below is old code
         assert not self.log.empty
         fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
-
+        # print(self.df.iloc[self.cur_step])
         for market in self.markets:
             token = market[4:7]
 
             market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
             fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
             self.df.plot( y=token +'Close', ax=ax1)
+            fig.autofmt_xdate()
 
         my_roi = ROI(self.log['Total Value'].iloc[0], self.log['Total Value'].iloc[-1])
         sharpe = my_roi/self.log['Total Value'].std()
@@ -646,7 +665,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         btc_amt = self.assets_owned[0]*self.asset_prices[0]
 
         if self.should_log:
-            row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':[datetime.now()+timedelta(hours=7)]})
+            row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':[self.df.iloc[self.cur_step].name]})
             row.set_index('Timestamp', drop = True, inplace = True)
             self.log = self.log.append(row, sort = False)
 
@@ -811,7 +830,7 @@ class BittrexExchange(ExchangeEnvironment):
         start = end - timedelta(days = 1)
 
         self._fetch_data(start, end)
-        print('PREPARED DATA:')
+        print('CANDLE DATA:')
         print(self.candle_df.head())
         print(self.candle_df.tail())
         self._prepare_data()
@@ -842,7 +861,7 @@ class BittrexExchange(ExchangeEnvironment):
         print('Updating log...', end = ' ')
         btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
         cur_val = btc_amt + self.USD
-        row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp':datetime.now()+timedelta(hours=7)})
+        row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp': pd.to_datetime(datetime.now()+timedelta(hours=7))})
         row.set_index('Timestamp', drop = True, inplace = True)
         self.log = self.log.append(row, sort = False)
         print('Done')
@@ -881,10 +900,6 @@ class BittrexExchange(ExchangeEnvironment):
         # get current value before performing the action
         action_vec = self.action_list[action]
 
-        cur_price = self.asset_prices[0]
-        bid_price = cur_price*(1 - self.mean_spread/2)  #We sell at this value
-        ask_price = cur_price*(1 + self.mean_spread/2)  #We buy at this value
-
         cur_val = self._get_val()
 
         if action_vec != self.last_action:  # if attmepting to change state
@@ -913,7 +928,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                     print("Aw jeez, I've got " + str(round(-decimal_diff*100,2)) + "% too much of my portfolio in " + str(currency_pair[4:]))
 
-                    trade_amount = decimal_diff * cur_val               #amount to sell of coin in USD, formatted to be neg for _trade logic
+                    trade_amount = min(decimal_diff * cur_val, self.assets_owned[i]*self.asset_prices[i]*.99)               #amount to sell of coin in USD, formatted to be neg for _trade logic
 
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
@@ -929,7 +944,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                     print("Oh boy, time to spend " + str(round(decimal_diff*100,2)) + "% of my portfolio on " + str(currency_pair[4:]))
 
-                    trade_amount = decimal_diff * cur_val               #amount to buy of coin in USD, formatted to be pos for _trade logic
+                    trade_amount = min(decimal_diff * cur_val, self.assets_owned[i]*self.asset_prices[i]*.99)               #amount to sell of coin in USD, formatted to be neg for _trade logic
 
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount in USD
 
@@ -1102,7 +1117,7 @@ class BittrexExchange(ExchangeEnvironment):
 
             amount_currency = round(amount/rate, 6)
 
-            most_possible = round(self.USD/rate * self.spread, 6)
+            most_possible = round(self.USD/rate * .997, 6)
 
             if amount_currency > most_possible:
                 amount_currency = most_possible
@@ -1113,10 +1128,10 @@ class BittrexExchange(ExchangeEnvironment):
 
         else:       # Sell
                  # cur_price is last price, meaning the last that was traded on the exchange
-            rate = round(self.asset_prices[0]*(1-self.mean_spread), 3)
+            rate = round(self.asset_prices[0]*(1-self.mean_spread/2), 3)
 
             amount_currency = round(-amount/rate, 6)
-            most_possible = round(self.assets_owned[0] * self.spread, 6)
+            most_possible = round(self.assets_owned[0], 6)
 
             if amount_currency > most_possible:
                 amount_currency = most_possible
@@ -1145,17 +1160,9 @@ class BittrexExchange(ExchangeEnvironment):
                 self.get_all_balances()        #updating with new amount of coin
                 self.print_account_health()
 
-
-                # print('Updating log...')
-                # btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
-                # cur_val = btc_amt + self.USD
-                # self.log = self.log.append(pd.DataFrame.from_records(
-                #     [dict(zip(self.log.columns, [btc_amt, cur_val]))]), ignore_index=True)
-                # print('Done')
-
-
             #this saves the information regardless of if the trade was successful or not
             self._get_and_save_order_data(uuid)
+
 
     def _monitor_order_status(self, uuid, time_limit = 30):
         """This method loops for a maximum duration of timelimit seconds, checking the status of the open order uuid that is passed.

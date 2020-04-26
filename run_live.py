@@ -53,7 +53,7 @@ print('done.')
 print('\n Oohh wee, here I go trading again! \n')
 
 start_time = datetime.now()
-loop_frequency = 60 #seconds
+loop_frequency = 60*env.granularity #seconds
 counter = 0
 
 while datetime.now() < start_time + timedelta(hours = 24):
@@ -75,10 +75,11 @@ while datetime.now() < start_time + timedelta(hours = 24):
         counter = 0
     else: counter += 1
 
-    sleep_time = timedelta(seconds = loop_frequency) - (datetime.now() - loop_start) #in seconds
+    sleep_time = (timedelta(seconds = loop_frequency) - (datetime.now() - loop_start)).seconds #in seconds
     # print(env.log)
-    print(f'Sleeping for {sleep_time.seconds} seconds.')
-    time.sleep(sleep_time.seconds)
+    if sleep_time > 1 and sleep_time < loop_frequency - 5:
+        print(f'Sleeping for {sleep_time} seconds.')
+        time.sleep(sleep_time)
 
 
 env.plot_market_data()

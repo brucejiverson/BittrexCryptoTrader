@@ -3,19 +3,22 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 end = datetime.now() - timedelta(days = 5)
-start = end - timedelta(hours = 40)
+start = end - timedelta(hours = 18)
 
-last_time_scraped = datetime.now() - timedelta(days = 3)
+last_time_scraped = datetime.now() - timedelta(days = .25)
 
 sim_env = SimulatedCryptoExchange(start, end)
 # sim_env.plot_
 df = sim_env.df.copy()
-df['Future Percent Change'] = 100*(df['BTCClose'].shift(1) - df['BTCClose'])/df['BTCClose']
-df['Last Percent Change'] = df['Future Percent Change'].shift(-1)
+df['Future Percent Change'] = 100*(df['BTCClose'].shift(-1) - df['BTCClose'])/df['BTCClose']
+df['Last BTCClose'] = df['BTCClose'].shift(1) - df['BTCClose'].shift(2)
+df['BTCClose'] = df['BTCClose'] - df['BTCClose'].shift(1)
+#Time difference the prices
+# df['Last Percent Change'] = df['Future Percent Change'].shift(1)
 print(df.tail())
 fig, ax = plt.subplots(1, 1)  # Create the figure
-feat1_name = 'SMA_80'
-feat2_name = 'BTCRSI'
+feat1_name = 'Last BTCClose'
+feat2_name = 'BTCClose'
 df[df['Future Percent Change'] > .05].plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'b')
 df[df['Future Percent Change'] < .05].plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'r')
 # for param in [30]:

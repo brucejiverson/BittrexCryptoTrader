@@ -20,23 +20,17 @@ from sklearn.preprocessing import StandardScaler
 """Whats Bruce working on?
     -fix remove_data
     -make live df state pull from last price and not candlestick
-    -analyze order log
-    -
     -search features for optimal parameters
     -train an agent!
-    -soometimes live agent gets caught in the sleep function
     -make data scraping work better
         -cum data shouldnt have download data
         -enable data scraping to handle multiple currencies -- see dataframe.join method or maybe merge
-
--change feature engineering to better represent how feature engineering works in real time
 """
 
 """Whats sean working on?
     -make state reflect the percentage change instead of amount of change in price
     -mirror act logic in simulation, mirror bid/ask
     -Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
-    -convert onemin candle to larger granularity size
     -Better feature engineering (more features, different features, more, less, DERIVATIVES OF FEATURES OF MULTIPLE ORDERS)
         -read up on technical analysis, 'indicators'
     -look up hedge fund stucturing
@@ -66,7 +60,7 @@ def maybe_make_dir(directory):
 
 def ROI(initial, final):
     # Returns the percentage increase/decrease
-    return round(final / initial - 1, 4) * 100
+    return round(100* final / initial - 1, 4)
 
 
 def filter_error_from_download_data(input_df):
@@ -184,7 +178,9 @@ if __name__ == '__main__':
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
 
-    agent = RegressionAgent(state_size, action_size)
+    agent = MeanReversionAgent()
+    # agent = EMAReversion(state_size, action_size)
+    # agent = RegressionAgent(state_size, action_size)
     # agent = DQNAgent(state_size, action_size)
     # agent = SimpleAgent(state_size, action_size)
     my_scaler = get_scaler(sim_env)

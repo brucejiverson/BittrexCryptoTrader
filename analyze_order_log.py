@@ -27,7 +27,7 @@ print('ORDER DATA: ')
 print(df.head())
 
 # success_rate
-n_success, cols = df[df['IsOpen'] == False].shape
+n_success, cols = df[df['Price'] == 0].shape
 n_order, cols = df.shape
 
 success_rate = 100*round(n_success/(n_order),3)

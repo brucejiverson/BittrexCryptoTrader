@@ -176,6 +176,7 @@ class RegressionAgent():
         self.action_size = action_size
 
         self.n_feat = self.state_size
+        self.last_action = 0
 
         #Load the weights
         path = paths['models'] + '/regression.pkl'
@@ -186,17 +187,97 @@ class RegressionAgent():
         features = state[-self.n_feat::].reshape((1, self.n_feat))
         # print(state)
         # print(features)
-        y_pred = self.model.predict(features) #predicted percentage change
-        if y_pred > .075: return 1
-        else: return 0
+        y_pred = self.model.predict(features)[0] #predicted percentage change
+        # print(y_pred)
+        # ddt = state[-1]
+        # EMA = state[-2]
+        # obv = state[-3]
 
-    # def train(self):
+        #sell in times of high volatility
+        # if abs(EMA) > 250:
+        #     return 0
+
+        # condition = all([y_pred[0] > .08, y_pred[1] > 0, y_pred[2] > -.25])
+        # condition = all([y_pred[0] > .05, y_pred[1] > 0])
+        condition = y_pred[0] > .05
+        if condition:
+            action = 1                                          #buy
+        # elif y_pred[0] > 0 and self.last_action == 1:
+        #     action = 1                                          #hold
+        else:
+            action = 0                                          #sell
+        self.last_action = action
+        return action
 
     def save_weights(self):
         #Save the weights
         path = paths['models'] + '/regression.pkl'
         with open(path, 'wb') as file:
             pickle.dump(model, file)
+
+class MeanReversionAgent():
+
+    def __init__(self):    #same
+
+        self.name = 'simple_momentum'
+        # These two correspond to number of inputs and outputs of the neural network respectively
+
+        self.last_state = []
+        self.hyperparams = {'Threshold': -5}
+        self.last_act = 0
+
+
+    def act(self, state):
+
+        price = state[0]
+        if price < self.hyperparams['Threshold']: action = 1    #buy
+        elif price < 1 and self.last_act == 1: action = 1
+        else: action = 0
+        self.last_act = action
+        return action
+
+class EMAReversion():
+
+    def __init__(self, state_size, action_size):    #same
+
+        self.name = 'mean_reversion'
+        # These two correspond to number of inputs and outputs of the neural network respectively
+        self.state_size = state_size
+        self.action_size = action_size
+
+        self.n_feat = self.state_size
+        self.last_act = 0
+        self.hyperparams = {'upper': 25, 'lower': 4}
+
+
+    def act(self, state):
+        features = state[-self.n_feat::].reshape((1, self.n_feat))
+        # print(state)
+        # print(features)
+
+        ddt_EMA_big = state[-1]
+        ddt_EMA_med = state[-2]
+        ddt_EMA_small = state[-3]
+
+        EMA_big = state[-4]
+        EMA_med = state[-5]
+        EMA_small = state[-6]
+        obv = state[-7]
+
+        if self.last_act == 0:
+            if EMA_small > self.hyperparams['upper'] :#or EMA_small > EMA_big:    #Need to buy
+                action = 1
+            else: action = self.last_act
+        elif EMA_small < self.hyperparams['lower'] and self.last_act == 1:  #Need to sell
+            action = 0
+        else: action = self.last_act
+
+        self.last_act = action
+        return action
+
+
+
+
 
 class BenchMarker:
     """For now, this just uses the Renko strategy. Eventually,
