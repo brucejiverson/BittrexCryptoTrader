@@ -168,7 +168,7 @@ class SimpleAgent():
 
 class RegressionAgent():
 
-    def __init__(self, state_size, action_size):    #same
+    def __init__(self, state_size, action_size):
 
         self.name = 'linear_regression'
         # These two correspond to number of inputs and outputs of the neural network respectively
@@ -215,26 +215,38 @@ class RegressionAgent():
         with open(path, 'wb') as file:
             pickle.dump(model, file)
 
-class MeanReversionAgent():
 
-    def __init__(self):    #same
+class MeanReversionAgent():
+    """This agent is a variation on Simple agent. It is based on the principle that when the last price change was negative,
+    there is a high probability that the next price change will be positive."""
+
+    def __init__(self, state_size, action_size):
 
         self.name = 'simple_momentum'
         # These two correspond to number of inputs and outputs of the neural network respectively
 
-        self.last_state = []
-        self.hyperparams = {'Threshold': -5}
+        self.state_size = state_size
+        self.action_size = action_size
+
+        self.last_state = np.zeros_like(self.state_size)
+        self.hyperparams = [-5, 2, 1]  #Organized as price threshhold, last price threshold, hold threshold
         self.last_act = 0
 
 
     def act(self, state):
 
         price = state[0]
-        if price < self.hyperparams['Threshold']: action = 1    #buy
-        elif price < 1 and self.last_act == 1: action = 1
+        # last_price = self.last_state[0]
+
+        buy_signal = all([price < self.hyperparams[0]])
+        # buy_signal = all([price < self.hyperparams[0], last_price < self.hyperparams[1]])
+        if buy_signal: action = 1                               #buy
+        elif price < self.hyperparams[2] and self.last_act == 1: action = 1       #hold
         else: action = 0
+
         self.last_act = action
         return action
+
 
 class EMAReversion():
 
@@ -274,9 +286,6 @@ class EMAReversion():
 
         self.last_act = action
         return action
-
-
-
 
 
 class BenchMarker:

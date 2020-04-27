@@ -18,18 +18,14 @@ from statistics import mean
 from sklearn.preprocessing import StandardScaler
 
 """Whats Bruce working on?
-    -fix remove_data
+    -improve mean reversion agent
     -make live df state pull from last price and not candlestick
     -search features for optimal parameters
-    -train an agent!
-    -make data scraping work better
-        -cum data shouldnt have download data
-        -enable data scraping to handle multiple currencies -- see dataframe.join method or maybe merge
+
 """
 
 """Whats sean working on?
-    -make state reflect the percentage change instead of amount of change in price
-    -mirror act logic in simulation, mirror bid/ask
+    -be able to run the code
     -Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
     -Better feature engineering (more features, different features, more, less, DERIVATIVES OF FEATURES OF MULTIPLE ORDERS)
         -read up on technical analysis, 'indicators'
@@ -37,8 +33,15 @@ from sklearn.preprocessing import StandardScaler
 """
 
 """OTHER FEATURES
+
+    -fix remove_data
+    -make data scraping work better
+        -cum data shouldnt have download data
+        -enable data scraping to handle multiple currencies -- df = pd.concat([xs, ys], axis = 1, sort = True)
+    -mirror act logic in simulation, mirror bid/ask
+    -make state reflect the percentage change instead of amount of change in price
     -agent logging
-    -make granularity work with live
+    -make change granularity work well (currently just pulls every nth row, we should be recalculating candle data)
     -make state reflect the percentage change instead of amount of change in price
 
     -incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
@@ -178,7 +181,7 @@ if __name__ == '__main__':
     state_size = sim_env.state_dim
     action_size = len(sim_env.action_space)
 
-    agent = MeanReversionAgent()
+    agent = MeanReversionAgent(state_size, action_size)
     # agent = EMAReversion(state_size, action_size)
     # agent = RegressionAgent(state_size, action_size)
     # agent = DQNAgent(state_size, action_size)

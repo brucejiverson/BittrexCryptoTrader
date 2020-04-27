@@ -10,7 +10,6 @@ import ta
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 
-# HEY brucejamesiverson
 #cryptodatadownload has gaps
 #Place to download: kaggle  iSinkInWater, brucejamesiverson@gmail.com, I**********
 #This has data for all currencies, 10 GB, too big for now https://www.kaggle.com/jorijnsmit/binance-full-history
