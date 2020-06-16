@@ -1,0 +1,111 @@
+Whats Bruce working on?
+    - Need a way to easily incorporate a new version of the download file.
+        - Read in the current binary
+        - Read in the csv
+        - append them together
+        - resave as csv 
+    - I failed to get relative imports working. Not sure why. This prevented organizing into files, which I don't particularly like
+        - syntax error on import ..<module>
+        - tried some solution with importing sys and os and adding an explicit address for the module to the PATH, unsuccessful
+    - Instead of pandas datetime, use regular datetime objects (deprecated data type)
+    -Make change granularity work with candle data
+
+    - Standardize agents
+        - Agents should pass required/desired features to the environment 
+            - This requires separation of feature construction
+        - Training
+        - Loading/saving
+        - Hyperparameter search
+    - Notion of "experiments"
+        - Design experiment to map the probability of a trade going through as a function of price
+    - Data scraping
+        - Make it work
+        - Incorporate order book logging
+    - Incorporate limit orders in backtesting simulations
+
+    - improve mean reversion agent
+    - make live df state pull from last price and not candlestick
+    - search features for optimal parameters
+
+Whats sean working on?
+    - be able to run the code
+    - Plot which currency is held at any given time. Needs to be scalable for multiple assests? May need to reevaluate how an agents performance is evaluated during testing.
+    - Better feature engineering (more features, different features, more, less, DERIVATIVES OF FEATURES OF MULTIPLE ORDERS)
+        - read up on technical analysis, 'indicators'
+    - look up hedge fund stucturing
+
+
+OTHER FEATURES
+
+    - fix remove_data
+    - make data scraping work better
+        - cum data shouldnt have download data
+        - enable data scraping to handle multiple currencies -- df = pd.concat([xs, ys], axis = 1, sort = True)
+    - mirror act logic in simulation, mirror bid/ask
+    - make state reflect the percentage change instead of amount of change in price
+    - agent logging
+    - make change granularity work well (currently just pulls every nth row, we should be recalculating candle data)
+    - make state reflect the percentage change instead of amount of change in price
+
+    - incorporate delayed trading (std dev?) (unnecessary if granularity is sufficiently large, say 10 min)
+    - be clear about episode/epoch terminology
+    - let the agent give two orders, a limit and stop
+    - model slippage based on trading volume (need data on each currencies order book to model this). Also maybe non essential
+
+Big Picture:
+    - Deep learning?
+    - Infrastructure :/ this is expensive and maybe impractical
+    - Trading multiple currencies
+
+
+PROJECT STRUCTURE DESIGN 
+parent
+    data
+    images
+    account logs
+    experimental results
+    root
+        - environments
+            - handles execution of all trading real or simulated
+            - handles retrieving candle data 
+            - contructs the state
+                - gets desired features from agent 
+                - constructs features based on the received list
+                - at state construction time:
+                    - gets the slice
+                    - scales the slice, makes it stationary where appropriate
+        - agents (the below file structure should be repeaed for each agent)
+            - an agent
+                - config (this is hyperparameters, features needed)
+                - trained models
+                - rewards
+                - module
+        - tools (feature constructors and more)       # operates on the candle data. does not include any scaling
+            - data paths
+            - ta indicators
+            - custom indicators (ie sign, derivatives, critical points)
+            - predictor indicators and associated analysis?
+            - trained models
+            - scripts
+                - train predictors
+        - scripts (these are the scripts where the agents and the environment interact)
+            - train (iterative backtesting)
+                - function to backtest once (play one episode)
+                - this should include hyperparameter searches
+            - run live
+            - paper trade
+
+
+Done: (started log on 6/14)
+- Shared x axis on plots
+- Switch to all to pickling and one data file https://stackoverflow.com/questions/37010212/what-is-the-fastest-way-to-upload-a-big-csv-file-in-notebook-to-work-with-python
+        - When I look at up_df right after it gets read, its not candle data, and includes features. Somehow, it got overwritten with the wrong data. 
+        - The save data function (or method) is never called in the environments files. How did the wrong data get saved? Is it an artifact from writting the data scrape file? It gets called in other srcripts
+        - It may make more sense to keep all currencies in candle df, and then pull the ones we want when features are constructed.
+        - At the end of this, go back and delete the column construction at the beginning of fetch_data
+- Can we get rid of candle df? Can we reorganize to make this more clear?
+    - No, it is useful to keep a pure data set and a separate feature comprised dataset.
+
+
+
+

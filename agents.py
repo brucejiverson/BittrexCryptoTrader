@@ -1,6 +1,6 @@
 import numpy as np
 import warnings
-from environments import paths
+from environments import f_paths
 import pickle
 
 
@@ -26,7 +26,7 @@ class LinearModel:
         return X.dot(self.W) + self.b
 
     def sgd(self, X, Y, learning_rate=0.0025, momentum=0.4):
-        """One step of gradient descent.
+        """One step of gradient descent.dddd
         learning rate was originally 0.01
         u = momentum term
         n = learning rate
@@ -179,7 +179,7 @@ class RegressionAgent():
         self.last_action = 0
 
         #Load the weights
-        path = paths['models'] + '/regression.pkl'
+        path = f_paths['models'] + '/regression.pkl'
         with open(path, 'rb') as file:
             self.model = pickle.load(file)
 
@@ -211,9 +211,49 @@ class RegressionAgent():
 
     def save_weights(self):
         #Save the weights
-        path = paths['models'] + '/regression.pkl'
+        path = f_paths['models'] + '/regression.pkl'
         with open(path, 'wb') as file:
             pickle.dump(model, file)
+
+
+class ClassificationAgent():
+
+    def __init__(self, state_size, action_size):
+
+        self.name = 'classifier'
+        # These two correspond to number of inputs and outputs of the neural network respectively
+        self.state_size = state_size
+        self.action_size = action_size
+
+        self.last_action = 0
+
+        #Load the weights
+        path = f_paths['models'] + '/classification.pkl'
+        with open(path, 'rb') as file:
+            self.model = pickle.load(file)
+
+    def act(self, state):
+
+        try:
+            y_pred = self.model.predict([state]) #predicted percentage change
+            action = int(y_pred[0])
+            # print(action)
+        except ValueError:
+            print(f'State: {state}')
+            raise(ValueError)
+        # # condition = y_pred > .05
+        # if y_pred == 1:
+        #     action = 1                                     #hold
+        # else:
+        #     action = 0                                          #sell
+        self.last_action = action
+        return action
+    #
+    # def save_weights(self):
+    #     #Save the weights
+    #     path = f_paths['models'] + '/regression.pkl'
+    #     with open(path, 'wb') as file:
+    #         pickle.dump(model, file)
 
 
 class MeanReversionAgent():
@@ -228,22 +268,24 @@ class MeanReversionAgent():
         self.state_size = state_size
         self.action_size = action_size
 
-        self.last_state = np.zeros_like(self.state_size)
-        self.hyperparams = [-5, 2, 1]  #Organized as price threshhold, last price threshold, hold threshold
+        self.last_state = np.zeros(self.state_size)
+        self.hyperparams = [-2, 2, 0]  #Organized as price threshhold, last price threshold, hold threshold
         self.last_act = 0
 
 
     def act(self, state):
 
         price = state[0]
-        # last_price = self.last_state[0]
+        last_price = self.last_state[0]
 
-        buy_signal = all([price < self.hyperparams[0]])
-        # buy_signal = all([price < self.hyperparams[0], last_price < self.hyperparams[1]])
+        # buy_signal = all([price < self.hyperparams[0]])
+        buy_signal = all([price < self.hyperparams[0], last_price < self.hyperparams[1]])
+        hold_signal = all([price > self.hyperparams[2], self.last_act == 1])
         if buy_signal: action = 1                               #buy
-        elif price < self.hyperparams[2] and self.last_act == 1: action = 1       #hold
+        elif hold_signal: action = 1       #hold
         else: action = 0
 
+        self.last_state = state
         self.last_act = action
         return action
 
@@ -283,6 +325,27 @@ class EMAReversion():
         elif EMA_small < self.hyperparams['lower'] and self.last_act == 1:  #Need to sell
             action = 0
         else: action = self.last_act
+
+        self.last_act = action
+        return action
+
+
+class MarketTester():
+    def __init__(self, state_size, action_size):    #same
+
+        self.name = 'tester'
+        # These two correspond to number of inputs and outputs of the neural network respectively
+        self.state_size = state_size
+        self.action_size = action_size
+
+        self.n_feat = self.state_size
+        self.last_act = 0
+
+
+    def act(self, state):
+
+        if self.last_act == 0: action = 1
+        else: action = 0
 
         self.last_act = action
         return action

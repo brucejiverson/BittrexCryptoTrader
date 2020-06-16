@@ -29,7 +29,9 @@ state = env.reset()
 state_size = env.state_dim
 action_size = len(env.action_space)
 print('Initializing agent...', end = ' ')
-agent = SimpleAgent(state_size, action_size)
+# agent = SimpleAgent(state_size, action_size)
+agent = MarketTester(state_size, action_size)
+
 # agent = DQNAgent(state_size, action_size)
 # my_scaler = get_scaler(env)
 
@@ -56,7 +58,7 @@ start_time = datetime.now()
 loop_frequency = 60*env.granularity #seconds
 counter = 0
 
-while datetime.now() < start_time + timedelta(hours = 24):
+while datetime.now() < start_time + timedelta(hours = .5):
     loop_start = datetime.now()
     bittrex_time = roundTime(datetime.now() + timedelta(hours = 7))
 

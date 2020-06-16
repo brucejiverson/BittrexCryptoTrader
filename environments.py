@@ -1,31 +1,30 @@
 from bittrex.bittrex import *
-
+# from feature-construction.feature_constructors import *
+from feature_constructor import *
 import pandas as pd
 import math
 from datetime import datetime, timedelta
 import itertools
 import numpy as np
 import json
-import ta
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 
 #cryptodatadownload has gaps
 #Place to download: kaggle  iSinkInWater, brucejamesiverson@gmail.com, I**********
 #This has data for all currencies, 10 GB, too big for now https://www.kaggle.com/jorijnsmit/binance-full-history
-#
 
 #The below should be updated to be simplified to use parent directory? unsure how that works...
 #https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
 
-paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
-'cum data csv': 'C:/Python Programs/crypto_trader/historical data/cumulative_data_all_currencies.csv',
+f_paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/data/bitstampUSD_1-min_data_2012-01-01_to_2020-04-22.csv',
+'cum data pickle': 'C:/Python Programs/crypto_trader/data/cum_data.pkl',
 'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-'rewards': 'agent_rewards',
-'models': 'agent_models',
-'order log': 'C:/Python Programs/crypto_trader/account logs/order_log.csv',
-'test trade log':  'C:/Python Programs/crypto_trader/account logs/trade_testingBTCUSD.csv',
-'account log': 'C:/Python Programs/crypto_trader/account logs/live_account_log.csv'}
+'rewards': 'agent-rewards',
+'models': 'agent-models',
+'order log': 'C:/Python Programs/crypto_trader/logging/order_log.csv',
+'test trade log':  'C:/Python Programs/crypto_trader/logging/trade_testingBTCUSD.csv',
+'logging': 'C:/Python Programs/crypto_trader/logging/live_account_log.csv'}
 
 
 def ROI(initial, final):
@@ -53,7 +52,7 @@ class ExchangeEnvironment:
         self.n_asset = len(self.markets)
         self.granularity = 1 #minutes
 
-        self.n_indicators = 7 #This HAS to match the number of features that have been created in the add features thing
+        self.n_indicators = 2 #This HAS to match the number of features that have been created in the add features thing
 
         portfolio_granularity = 1  # EMAllest fraction of portfolio for investment in single asset (.01 to 1)
         # The possible portions of the portfolio that could be allocated to a single asset
@@ -91,7 +90,7 @@ class ExchangeEnvironment:
         self.log = pd.DataFrame(columns=log_columns)
 
 
-    def _process_candle_dict(self, candle_dictionary, market):
+    def _parse_candle_dict(self, candle_dictionary, market):
         # Dataframe formatted the same as in other functions
         # V and BV refer to volume and base volume
         ticker = market[4:7]
@@ -107,19 +106,13 @@ class ExchangeEnvironment:
         return df
 
 
-    def _fetch_data(self, start_date, end_date):
+    def _fetch_candle_data(self, start_date, end_date):
         """This function pulls data from the exchange, the cumulative repository, and the data download in that order
         depending on the input date range. Typically called in the __init__ method"""
 
         print('Fetching historical data...')
 
-        #construct the column names to use in the output df
-        cols = []
-        for market in self.markets:
-            for item in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                cols.append(market[4:7] + item)
-
-        df = pd.DataFrame()#columns=cols)
+        df = pd.DataFrame()
 
         # Fetch candle data from bittrex for each market
         if end_date > datetime.now() - timedelta(days=9):
@@ -132,7 +125,7 @@ class ExchangeEnvironment:
 
                     if candle_dict['success']:
                         # print(candle_dict)
-                        candle_df = self._process_candle_dict(candle_dict, market)
+                        candle_df = self._parse_candle_dict(candle_dict, market)
                         print("done.")
                         # print(candle_df.head())
                         break
@@ -154,43 +147,43 @@ class ExchangeEnvironment:
                 # df = df.append(candle_df, sort = True) #ok this works
                 # print(df.tail())
 
-        path = paths['cum data csv']
-
-        if df.empty or df.index.min() > start_date:  # try to fetch from updated
+        # Fetch from binary data file or download csv
+        if df.empty or df.index.min() > start_date:  #
             print('Fetching data from cumulative data repository.')
+            # log = pd.read_pickle(log_path)
+            # log.to_pickle(log_path)
+            try:
+                cum_df = pd.read_pickle(f_paths['cum data pickle'])
+                df = df.append(cum_df, sort = True)
+            except FileNotFoundError:                                       # Read the original download file
+                print('Binary data file not found. Fetching from downloaded csv file.')
+                try:
+                    # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+                    def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+                    cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+                    orig_df = pd.read_csv(f_paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+                    name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
+                    orig_df.rename(columns= name_map, inplace=True)
+                    orig_df.set_index('Timestamp', inplace = True, drop = True)
 
-            def dateparse(x): return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-            up_df = pd.read_csv(path, index_col = 'TimeStamp', parse_dates = True, date_parser=dateparse)
+                    assert not orig_df.empty
 
-            assert not up_df.empty
-            print('Success fetching from cumulative data repository.')
-            up_df.set_index('TimeStamp', drop = True, inplace = True)
-            # print(df.tail())
-            # print('CUM DATA DF:')
-            # print(up_df.head())
-            # print(up_df.tail())
-            df = df.append(up_df, sort = True)
-            # print('DATA INCL CUMULATIVE DATA REPOSITORY:')
-            # print(df.head())
-            # print(df.tail())
+                    df = df.append(orig_df, sort = True)
+                    df.sort_index(inplace = True) #apparently this is necessary otherwise the orig_df is in reverse order
+                    print(df.head())
+                    print(df.tail())
+                    
+                    # self.save_candle_data() # This function currently tries to append to self.candle_df. Better to just write to file. 
+                    print('Data written to binary file.')
+                except FileNotFoundError:
+                    print('Please download the csv historical data file from kaggle.')
+                    raise(FileNotFoundError)
 
-        if df.empty or df.index.min() > start_date:  # Fetch from download file (this is last because its slow)
-
-            print('Fetching data from the download file.')
-            # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-
-            def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-            cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-            orig_df = pd.read_csv(paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
-
-            name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
-            orig_df.rename(columns= name_map, inplace=True)
-            orig_df.set_index('Timestamp', inplace = True, drop = True)
-
-            assert not orig_df.empty
-
-            df = df.append(orig_df, sort = True)
-            df.sort_index(inplace = True) #apparently this is necessary otherwise the orig_df is in reverse order
+            assert not df.empty
+            print(df.head())
+            df.to_pickle(f_paths['cum data pickle'])
+            print('Success fetching from cumulative data repository. Data written to file.')
+            # df.set_index('TimeStamp', drop = True, inplace = True)
 
         # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
         # print(df.index.min())
@@ -198,22 +191,20 @@ class ExchangeEnvironment:
 
         assert(df.index.min() <= start_date)
 
-        #This was a different way that was unsuccessful. leaving for reference
-        # df = df.index.indexer_between_time(start_date, end_date)
-
-        #Drop undesired currencies
-        for col in df.columns:
-            market = 'USD-' + col[0:3] #should result in 'USD-ETH' or similar
-            #drop column if necessary
-            if not market in self.markets: df.drop(columns=[col], inplace = True)
+        # # Drop undesired currencies
+        # for col in df.columns:
+        #     market = 'USD-' + col[0:3] #should result in 'USD-ETH' or similar
+        #     # Drop column if necessary
+        #     if not market in self.markets: df.drop(columns=[col], inplace = True)
 
         # print('Here is the most recent candle info I gathered: ')
         # print(df.tail(1))
-        df = df.loc[df.index > start_date + timedelta(hours = 7)] #not the culprit in the altered gran
+        df = df.loc[df.index > start_date + timedelta(hours = 7)]
         df = df.loc[df.index < end_date + timedelta(hours = 7)]
         # print('Here is the most recent candle info in the candle df:')
         # print(df.tail(1))
-        self.candle_df = self._format_df(df) #completely resets the candle_df)
+        self.candle_df = self._format_df(df) # Completely resets the candle_df
+        self._change_df_granularity()
 
 
     def _format_df(self, df):
@@ -221,9 +212,9 @@ class ExchangeEnvironment:
         Needs to be updated to handle multiple assets. Note that this should only be used before high low open are stripped from the data."""
         # input_df = input_df[['Date', 'BTCClose']]
         formatted_df = df.copy()
-        formatted_df = formatted_df.loc[~formatted_df.index.duplicated(keep = 'first')] #this is intended to remove duplicates. ~ flips bits
+        formatted_df = formatted_df.loc[~formatted_df.index.duplicated(keep = 'first')]     # this is intended to remove duplicates. ~ flips bits in the mask
 
-        # cols = formatted_df.columns #started writing this cause it doesnt work for mulitple currencies
+        # cols = formatted_df.columns # Started writing this cause it doesnt work for mulitple currencies
         # bool_series = df['BTCClose'].notnull()
         # formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
 
@@ -233,167 +224,11 @@ class ExchangeEnvironment:
         return formatted_df.dropna()
 
 
-    def _prepare_data(self):
-        """This method takes the raw candle data and constructs features, changes granularity, etc.
-        Typically called in the init method"""
-
-
-        self.df = self.candle_df.copy()
-        self._change_df_granularity(2)
-
-        #This section constructs engineered features and adds them as columns to the df
-        """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
-
-        print('Constructing features... ', end = ' ')
-
-        def add_EMA_as_column(token, p):
-            # p is a number
-            price = self.df[token + 'Close'].values  # returns an np price, faster
-
-            ema = np.empty_like(price)
-            k = 2/(p - 1)
-            for i, item in enumerate(np.nditer(price)):
-                if i == 0:
-                    ema[i] = item
-                elif i < p: #EMA
-                    ema[i] = price[0:i].mean()
-                else:
-                    ema[i] = price[i]*k + ema[i-1]*(1- k) #price[(i - p):i].mean()
-
-            col_name = 'EMA_' + str(p)
-            self.df[col_name] = ema  # modifies the input df
-            self.df[col_name] = self.df[col_name] - self.df[token + 'Close']
-
-        def add_renko(blocksize, token):
-            #reference for how bricks are calculated https://www.tradingview.com/wiki/Renko_Charts
-            # p is a number
-            prices = self.df[token + 'Close'].values  # returns an np price, faster
-
-            renko = np.empty_like(prices)
-
-            indicator_val = 0
-            #Loop to calculate the renko value at each data point
-            for i, price in enumerate(np.nditer(prices)):
-                if i == 0:
-                    upper_thresh = price + blocksize
-                    lower_thresh = price - blocksize
-                elif price <= lower_thresh: #create a down block
-
-                    indicator_val -= blocksize #continuing a downtrend
-                    lower_thresh -= blocksize
-                    upper_thresh = lower_thresh + 3*blocksize
-
-                elif price >= upper_thresh: #create an up block
-
-                    indicator_val += blocksize #continuing an uptrend
-                    upper_thresh += blocksize
-                    lower_thresh = upper_thresh - 3*blocksize
-
-                    renko[i] = indicator_val
-
-                period = 5
-                indicator = np.empty_like(prices)
-
-            # #Loop to interpret the renko to be more useful
-            # for i, item in enumerate(renko):
-            #     if i == 0:
-            #         indicator[i] = item
-            #     elif i < period:
-            #         indicator[i] = renko[0:i].mean()
-            #     else:
-            #         indicator[i] = renko[(i - period):i].mean() - renko[i-period]
-
-            self.df['Renko'] = renko
-
-        def add_sentiment(mydata):
-            """This function pulls sentiment data from the crypto fear and greed index. That data is updated daily.
-            This is the link to the website: https://alternative.me/crypto/fear-and-greed-index/#fng-history
-            The 'limit' argument is the number of data points to fetch (one for each day).
-            The given value is on a scale of 0 - 100, with 0 being extreme fear and 100 being extreme greed."""
-
-
-            #Get the oldest date and figure out how long ago it was
-            days = (datetime.now() - mydata.Date.min()).days + 1 #validated this is correct
-            url = "https://api.alternative.me/fng/?limit="+ str(days) +"&date_format=us"
-
-            data = requests.get(url).json()["data"] #returns a list of dictionaries
-
-            sentiment_df = pd.DataFrame(data)
-
-            #Drop unnecessaary columns
-            sentiment_df.drop(columns = ["time_until_update", "value_classification"], inplace = True)
-            #Rename the columns
-            sentiment_df.rename(columns={'timestamp': 'Date', 'value': 'Value'}, inplace = True)
-            #Format the dates
-            sentiment_df['Date'] = pd.to_datetime(sentiment_df["Date"], format = "%m-%d-%Y")
-            #Convert value to int, and center the sentiment value at 0
-            sentiment_df["Value"] = sentiment_df['Value'].apply(int)
-            sentiment_df['Value'] = sentiment_df['Value'] - 50
-
-            #This should really be done with resample but I had a tough time getting it to work that way
-
-            sentiment = np.empty_like(mydata.BTCClose)
-
-            for i, row in mydata.iterrows():
-                #Checked that both dfs have pandas timestamp date datatypes
-                try:
-                    sentiment[i] = sentiment_df[sentiment_df.Date == row.Date.floor(freq = 'D')].Value
-                except ValueError:
-                    print('Index: ' + str(i))
-                    print(sentiment)
-
-                    # print("SENTIMENT VECTOR: : ")
-                    # print(sentiment)
-                    mydata['Sentiment'] = sentiment
-
-        def discrete_derivative(col_name):
-            # self.df['d/dt_' + col_name] = (self.df[col_name].shift(-1, fill_value = 0) - self.df[col_name].shift(1, fill_value = 0))/(2*self.granularity) #this is a centered derivative
-            # self.df['d/dt_' + col_name].iloc[-1] = self.df[col_name][-2] - self.df[col_name][-1])/self.granularity  #Fill in the last value
-            self.df['d/dt_' + col_name] = (self.df[col_name] - self.df[col_name].shift(1))/self.granularity  #I used a non centered derivative because in real time this is the best we can do
-
-        # print(self.df.head())
-
-        #Add the features to the df
-        for market in self.markets:
-            token = market[4:7] #this is something like 'BTC' or 'ETH'
-
-            self.df[token + 'OBV'] = ta.volume.on_balance_volume(self.df[token + 'Close'], self.df[token + 'Volume'], fillna  = True)
-            self.df[token + 'OBV'] = self.df[token + 'OBV'] - self.df[token + 'OBV'].shift(1)
-            # self.df[token + 'MACD'] = ta.trend.macd_diff(self.df[token + 'Close'], fillna  = True)
-            # self.df[token + 'RSI'] = ta.momentum.rsi(self.df[token + 'Close'], fillna  = True) - 50
-            base = 80
-            add_EMA_as_column(token, base)
-            add_EMA_as_column(token, int(base*8/3))
-            add_EMA_as_column(token, int(base*13/3))
-            discrete_derivative('EMA_' + str(base))
-            discrete_derivative('EMA_' + str(int(base*8/3)))
-            discrete_derivative('EMA_' + str(int(base*13/3)))
-
-            # add_sentiment(input_df)
-
-            # add_renko(renko_block)
-        print('done.')
-
-
-        df_cols = self.df.columns
-
-        # Strip out open high low close
-        for market in self.markets:
-            token = market[4:7]
-            for col in df_cols:
-                if col in [token + 'Open', token + 'High', token + 'Low']:
-                    self.df.drop(columns=[col], inplace = True)
-
-        # self._change_df_granularity(5)
-
-        # print(self.df.head())
-        self.asset_data = self.df.values #used in sim only
-
-
-    def _change_df_granularity(self, gran):
+    def _change_df_granularity(self):
         """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes).
         This could possibly be imporved in the future with the ".resample()" method."""
 
+        gran = self.granularity
         print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
 
         # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
@@ -415,48 +250,53 @@ class ExchangeEnvironment:
         # print(df.head())
         # self.df = df
         self.granularity = gran
-        self.df =  self.df.iloc[::gran, :]
-        self.df = self._format_df(self.df)
+        self.candle_df =  self.candle_df.iloc[::gran, :]
+        self.candle_df = self._format_df(self.candle_df)
         # else:
             # print('Granularity of df input to change_df_granularity was not 1 minute.')
             # raise(ValueError)
             # return input_df
 
 
-    def save_data(self):
+    def save_candle_data(self):
         # This function writes the information in the original format to the csv file
         # including new datapoints that have been fetched
 
-        print('Writing data to CSV.')
+        print("Writing data to file.")
+        path = f_paths['cum data pickle']
+        old_df = pd.read_pickle(path)
+        df_to_save = self.candle_df.append(old_df)
+        df_to_save.to_pickle(path)
+        # print('Writing data to CSV.')
 
-        path = paths['cum data csv']
+        # path = f_paths['cum data csv']
 
-        # datetimes to strings
-        print('Fetching data from the download file...', end = ' ')
-        # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+        # # datetimes to strings
+        # print('Fetching data from the download file...', end = ' ')
+        # # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
 
-        def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-        cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-        orig_df = pd.read_csv(paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+        # def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+        # cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+        # orig_df = pd.read_csv(f_paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
 
-        name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
-        orig_df.rename(columns= name_map, inplace=True)
-        orig_df.set_index('Timestamp', inplace = True, drop = True)
-        print('Fetched.')
-        df_to_save = self.df.append(orig_df, sort = True)
+        # name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
+        # orig_df.rename(columns= name_map, inplace=True)
+        # orig_df.set_index('Timestamp', inplace = True, drop = True)
+        # print('Fetched.')
+        # df_to_save = self.df.append(orig_df, sort = True)
 
-        #Drop features and indicators, all non savable data
-        for col in df_to_save.columns:
-            if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                df_to_save.drop(col, axis = 1, inplace = True)
+        # #Drop features and indicators, all non savable data
+        # for col in df_to_save.columns:
+        #     if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        #         df_to_save.drop(col, axis = 1, inplace = True)
 
-        df_to_save = self._format_df(df_to_save)
+        # df_to_save = self._format_df(df_to_save)
 
-        # df_to_save = filter_error_from_download_data(df_to_save)
-        df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
+        # # df_to_save = filter_error_from_download_data(df_to_save)
+        # df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
 
-        # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
-        print('Data written.')
+        # # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
+        # print('Data written.')
 
 
     def test_data_stationarity(self):
@@ -467,8 +307,8 @@ class ExchangeEnvironment:
         than the critical value, we fail to reject the null hypothesis (which means
         the series is not stationary)."""
 
-        # #These lines make the data stationary for stationarity testing
-        # #log(0) = -inf. Some indicators have 0 values which causes problems w/ log
+        # # These lines make the data stationary for stationarity testing
+        # # log(0) = -inf. Some indicators have 0 values which causes problems w/ log
         transformed_df = self.df.copy()
 
         cols = transformed_df.columns
@@ -552,7 +392,7 @@ class ExchangeEnvironment:
         sharpe = my_roi/self.log['Total Value'].std()
         print(f'Sharpe Ratio: {sharpe}') #one or better is good
 
-        self.log.plot(y='Total Value', ax=ax2)
+        self.log.plot(y='Total Value', ax=ax2, kind = 'scatter')
         # self.log.plot(y='$ of BTC', ax = ax2)            # !!! not formatted to work with multiple coins
         fig.autofmt_xdate()
 
@@ -562,7 +402,7 @@ class ExchangeEnvironment:
         # I had a ton of trouble getting the plots to look right with the dates.
         # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html
         assert not self.df.empty
-        fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)  # Create the figure
 
         for market in self.markets:
             token = market[4:7]
@@ -570,7 +410,6 @@ class ExchangeEnvironment:
             market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
             fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
             self.df.plot( y=token +'Close', ax=ax1)
-
 
         for col in self.df.columns:
             if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
@@ -598,11 +437,17 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         highest order array gives a snapshot of all data at a particular time, and information at the point
         in time can be captured by indexing that snapshot."""
 
-        self._fetch_data(start, end)
+        self._fetch_candle_data(start, end)
         print("PRICE HISTORY DATA: ")
         print(self.candle_df.head())
         print(self.candle_df.tail())
-        self._prepare_data() #This fills in the asset_data array
+        #Convention here is string key, list of hyperparams typically for multiple of the feature type
+        features = {#'sign': ['Close', 'Volume'], 
+                    'EMA': [50,80,130],
+                    'time of day': [],
+                    'stack': [1]}                  # This is how many of the previous states to include
+        self.df = build_features(self.candle_df, self.markets, features) # This fills in the asset_data array
+        self.asset_data = self.df.values
         print('PREPARED DATA:')
         print(self.df.head())
         print(self.df.tail())
@@ -757,12 +602,12 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
             #Calculate the changes needed for each asset
             # delta = [s_prime - s for s_prime, s in zip(action_vec, self.last_action) #not using this now, but how it should be done
-
+            fees = .002                 # Bittrex rate for both maker and taker for 30 day volume < $50k
 
             #Below this is the old way
              # Sell everything
             for i, a in enumerate(action_vec):
-                self.USD += self.assets_owned[i] * self.asset_prices[i]
+                self.USD += self.assets_owned[i] * self.asset_prices[i] * (1 - fees)
                 self.assets_owned[i] = 0
 
             # Buy back the right amounts
@@ -828,7 +673,7 @@ class BittrexExchange(ExchangeEnvironment):
         end = datetime.now()
         start = end - timedelta(days = 1)
 
-        self._fetch_data(start, end)
+        self._fetch_candle_data(start, end)
         print('CANDLE DATA:')
         print(self.candle_df.head())
         print(self.candle_df.tail())
@@ -853,7 +698,7 @@ class BittrexExchange(ExchangeEnvironment):
         end = datetime.now()
         start = datetime.now() - timedelta(hours = 6)
 
-        self._fetch_data(start, end)
+        self._fetch_candle_data(start, end)
         self._prepare_data()
         self.get_all_balances()
 
@@ -1002,7 +847,7 @@ class BittrexExchange(ExchangeEnvironment):
                 candle_dict = self.bittrex_obj_2.get_latest_candle(market, 'oneMin')
 
                 if candle_dict['success']:
-                    candle_df = self._process_candle_dict(candle_dict, market)
+                    candle_df = self._parse_candle_dict(candle_dict, market)
                     print("Success.")
                     print(candle_df)
                     break
@@ -1210,7 +1055,7 @@ class BittrexExchange(ExchangeEnvironment):
 
         print('Fetching order data...', end = ' ')
         date_format = "%Y-%m-%dT%H:%M:%S"
-        path = paths['order log']
+        path = f_paths['order log']
 
         dict = self.bittrex_obj_1_1.get_order(uuid)
 
@@ -1260,7 +1105,7 @@ class BittrexExchange(ExchangeEnvironment):
                 return pd.datetime.strptime(x, date_format)
             except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
                 return x
-        df = pd.read_csv(paths['order log'], parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
+        df = pd.read_csv(f_paths['order log'], parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
         df.set_index('Opened', inplace = True, drop = True)
         print(' ')
         print('ALL ORDER INFORMATION:')
@@ -1271,8 +1116,8 @@ class BittrexExchange(ExchangeEnvironment):
     def save_log(self):
         """This method append to the log to the csv."""
 
-        print('Saving account log...', end = ' ')
-        path = paths['account log']
+        print('Saving logging...', end = ' ')
+        path = f_paths['logging']
         date_format = "%Y-%m-%d %I-%p-%M"
 
         #Load the old log
@@ -1300,7 +1145,7 @@ class BittrexExchange(ExchangeEnvironment):
 
         print('Fetching all recent order data...', end = ' ')
         date_format = "%Y-%m-%dT%H:%M:%S"
-        path = paths['order log']
+        path = f_paths['order log']
 
         #This section fetches order data from the exchange for each relevant currency pair.
         #This will eventually need to be updated to accomodate for inter asset trading
@@ -1343,3 +1188,8 @@ class BittrexExchange(ExchangeEnvironment):
             print('Order log is empty.')
         print('Data written to test trade log.')
         print(old_df)
+
+
+if __name__ == '__main__':
+    # This will do data scraping
+    sim_env = SimulatedCryptoExchange()
