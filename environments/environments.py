@@ -1,6 +1,6 @@
 from bittrex.bittrex import *
 # from feature-construction.feature_constructors import *
-from feature_constructor import *
+from bittrex_trader.features.feature_constructor import *
 import pandas as pd
 import math
 from datetime import datetime, timedelta
@@ -1192,4 +1192,5 @@ class BittrexExchange(ExchangeEnvironment):
 
 if __name__ == '__main__':
     # This will do data scraping
+    print("Creating simulation environment.")
     sim_env = SimulatedCryptoExchange()

@@ -1,4 +1,4 @@
-from environments import *
+from bittrex_trader.environments.environments import *
 from datetime import datetime, timedelta
 import pandas as pd
 

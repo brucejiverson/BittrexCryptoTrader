@@ -1,4 +1,34 @@
 Whats Bruce working on?
+
+    - Make granularity a passable hyperparameter
+        - additionally, the features to construct
+    - Instead of pandas datetime, use regular datetime objects (deprecated data type)
+    - Make change granularity work with candle data
+    - Add limit orders to environments 
+        - Probably involves adding a 'type' attribute to the action
+        - This actually requires a more sophiticated set of logic 
+
+    - predictors
+        - integrate
+            
+        - fix error with nas
+
+    - Standardize agents
+        - Agents should pass required/desired features to the environment 
+            - This requires separation of feature construction
+        - Training
+        - Loading/saving
+        - Hyperparameter search (gridsearch)
+
+    - Notion of "experiments"
+        - Design experiment to map the probability of a trade going through as a function of price
+    - Data scraping
+        - Incorporate order book logging
+    - Incorporate limit orders in backtesting simulations
+
+    ----ICEBOX----
+    - improve mean reversion agent
+    - make live df state pull from last price and not candlestick
     - Need a way to easily incorporate a new version of the download file.
         - Read in the current binary
         - Read in the csv
@@ -7,25 +37,7 @@ Whats Bruce working on?
     - I failed to get relative imports working. Not sure why. This prevented organizing into files, which I don't particularly like
         - syntax error on import ..<module>
         - tried some solution with importing sys and os and adding an explicit address for the module to the PATH, unsuccessful
-    - Instead of pandas datetime, use regular datetime objects (deprecated data type)
-    -Make change granularity work with candle data
 
-    - Standardize agents
-        - Agents should pass required/desired features to the environment 
-            - This requires separation of feature construction
-        - Training
-        - Loading/saving
-        - Hyperparameter search
-    - Notion of "experiments"
-        - Design experiment to map the probability of a trade going through as a function of price
-    - Data scraping
-        - Make it work
-        - Incorporate order book logging
-    - Incorporate limit orders in backtesting simulations
-
-    - improve mean reversion agent
-    - make live df state pull from last price and not candlestick
-    - search features for optimal parameters
 
 Whats sean working on?
     - be able to run the code
@@ -59,12 +71,12 @@ Big Picture:
 
 
 PROJECT STRUCTURE DESIGN 
-parent
+project
     data
     images
     account logs
     experimental results
-    root
+    code
         - environments
             - handles execution of all trading real or simulated
             - handles retrieving candle data 
