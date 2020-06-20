@@ -1,6 +1,7 @@
 from bittrex.bittrex import *
 # from feature-construction.feature_constructors import *
-from bittrex_trader.features.feature_constructor import *
+from features.feature_constructor import *
+from tools.tools import *
 import pandas as pd
 import math
 from datetime import datetime, timedelta
@@ -10,37 +11,27 @@ import json
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 
-#cryptodatadownload has gaps
-#Place to download: kaggle  iSinkInWater, brucejamesiverson@gmail.com, I**********
-#This has data for all currencies, 10 GB, too big for now https://www.kaggle.com/jorijnsmit/binance-full-history
+# cryptodatadownload has gaps
+# Place to download: kaggle  iSinkInWater, brucejamesiverson@gmail.com, I**********
+# This has data for all currencies, 10 GB, too big for now https://www.kaggle.com/jorijnsmit/binance-full-history
 
-#The below should be updated to be simplified to use parent directory? unsure how that works...
-#https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
-
-f_paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/data/bitstampUSD_1-min_data_2012-01-01_to_2020-04-22.csv',
-'cum data pickle': 'C:/Python Programs/crypto_trader/data/cum_data.pkl',
-'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-'rewards': 'agent-rewards',
-'models': 'agent-models',
-'order log': 'C:/Python Programs/crypto_trader/logging/order_log.csv',
-'test trade log':  'C:/Python Programs/crypto_trader/logging/trade_testingBTCUSD.csv',
-'logging': 'C:/Python Programs/crypto_trader/logging/live_account_log.csv'}
-
+# The below should be updated to be simplified to use parent directory? unsure how that works...
+# https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
 
 def ROI(initial, final):
     # Returns the percentage increase/decrease
     return round(final / initial - 1, 2)*100
 
 
-class ExchangeEnvironment:
+class ExchangeEnvironment(object):
     """All other environment classes inherit from this class. This is done to ensure similar architecture
     between different classes (eg simulated vs real exchange), and to make it easy to change that
     architecture by having change be in a single place."""
 
-    def __init__(self):
+    def __init__(self, gran):
 
         #get my keys
-        with open("/Users/biver/Documents/crypto_data/secrets.json") as secrets_file:
+        with open(f_paths['secret']) as secrets_file:
             keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
             secrets_file.close()
 
@@ -50,7 +41,7 @@ class ExchangeEnvironment:
 
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
-        self.granularity = 1 #minutes
+        self.granularity = gran # minutes
 
         self.n_indicators = 2 #This HAS to match the number of features that have been created in the add features thing
 
@@ -112,8 +103,57 @@ class ExchangeEnvironment:
 
         print('Fetching historical data...')
 
-        df = pd.DataFrame()
+        # - algorithm pseudocode:
+        #     - scrape the latest data
+        #     - try:
+        #         - load to the 1 min binary file
+        #     - except
+        #       - load from csv
+        #     - save to 1 min file
+        #     - filter for the correct date range
+        #     - if gran not 1
+        #       - change gran of scraped data
+        #     - if date range doesnt overlaps more than scraped data
+        #        - try
+        #           -load existing binary file for the chosen granularity
+        #         -except
+        #           - change gran of 1 min df
+        #         - combine scraped and loaded - - needs validation
+        #         - save to file
 
+        def fetch_csv():
+            try:
+                df = pd.DataFrame()
+                # Read the original download file
+                # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+                def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+                cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+                orig_df = pd.read_csv(f_paths['downloaded csv'], 
+                                                usecols=cols_to_use, 
+                                                parse_dates=['Timestamp'], 
+                                                date_parser=dateparse)
+                name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow',
+                    'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
+                orig_df.rename(columns=name_map, inplace=True)
+                orig_df.set_index('Timestamp', inplace=True, drop=True)
+
+                assert not orig_df.empty
+
+                df = df.append(orig_df, sort=True)
+                # apparently this is necessary otherwise the orig_df is in reverse order
+                df.sort_index(inplace=True)
+                print(df.head())
+                print(df.tail())
+
+                # self.save_candle_data() # This function currently tries to append to self.candle_df. Better to just write to file.
+                # print('Data written to binary file.')
+                return df
+            except FileNotFoundError:
+                print('no csv file found. Please download the csv historical data file from kaggle.')
+                raise(FileNotFoundError)
+
+        df_1_min = pd.DataFrame()
+        scraped_df = pd.DataFrame()
         # Fetch candle data from bittrex for each market
         if end_date > datetime.now() - timedelta(days=9):
             for i, market in enumerate(self.markets):
@@ -129,7 +169,8 @@ class ExchangeEnvironment:
                         print("done.")
                         # print(candle_df.head())
                         break
-                    else: #If there is an error getting the proper data
+                    # If there is an error getting the proper data
+                    else:
                         print("Failed to get candle data. Candle dict: ", end = ' ')
                         print(candle_dict)
                         time.sleep(2*attempts)
@@ -138,73 +179,83 @@ class ExchangeEnvironment:
                         if attempts == 5:
                             print('Exceeded maximum number of attempts.')
                             raise(TypeError)
-                            print('Retrying...')
-                            #The below logic is to handle joinging data from multiple currencies
-                if i == 0: df = df.append(candle_df, sort = True)
-                else: df = pd.concat([df, candle_df], axis = 1)
+                        print('Retrying...')
+                # Handle joining data from multiple currencies
+                if i == 0: scraped_df = scraped_df.append(candle_df, sort = True)
+                else: scraped_df = pd.concat([scraped_df, candle_df], axis = 1)
                 # print('CANDLE DF:')
                 # print(candle_df.tail())
-                # df = df.append(candle_df, sort = True) #ok this works
-                # print(df.tail())
+                # df_1_min = df_1_min.append(candle_df, sort = True) #ok this works
+                # print(df_1_min.tail())
 
-        # Fetch from binary data file or download csv
-        if df.empty or df.index.min() > start_date:  #
-            print('Fetching data from cumulative data repository.')
-            # log = pd.read_pickle(log_path)
-            # log.to_pickle(log_path)
-            try:
-                cum_df = pd.read_pickle(f_paths['cum data pickle'])
-                df = df.append(cum_df, sort = True)
-            except FileNotFoundError:                                       # Read the original download file
-                print('Binary data file not found. Fetching from downloaded csv file.')
+        df_1_min = df_1_min.append(scraped_df, sort=True)
+        # Update the binary file
+        print('Fetching from cum. data repository... ', end='')
+        try:
+            cum_df = pd.read_pickle(f_paths['cum data pickle']+'1.pkl')
+            df_1_min = df_1_min.append(cum_df, sort=True)
+            print('binary file 1 min granularity loaded... ', end='')
+        except FileNotFoundError:
+            cum_df = fetch_csv()
+            print('csv file 1 min granularity loaded... ', end='')
+        
+        df_1_min = df_1_min.append(cum_df, sort=True)
+        df_1_min = self._format_df(df_1_min)
+        df_1_min.to_pickle(f_paths['cum data pickle'] + '1.pkl')
+        print('data written to file.')
+
+        print('1 MINUTE DATA:')
+        print(df_1_min.head())
+        print(df_1_min.tail())
+        
+        assert(df_1_min.index.min() <= start_date)
+
+        # Drop undesired currencies
+        for col in df_1_min.columns:
+            market = 'USD-' + col[0:3]  # should result in 'USD-ETH' or similar
+            # Drop column if necessary
+            if not market in self.markets:
+                df_1_min.drop(columns=[col], inplace=True)
+        
+        # print('Here is the most recent candle info I gathered: ')
+        # print(df_1_min.tail(1))
+        df_1_min = df_1_min.loc[df_1_min.index > start_date + timedelta(hours = 7)]
+        df_1_min = df_1_min.loc[df_1_min.index < end_date + timedelta(hours = 7)]
+        # print('Here is the most recent candle info in the candle df_1_min:')
+        # print(df_1_min.tail(1))
+
+        df = pd.DataFrame()                         # This is the dataframe that will
+        gran = self.granularity
+        if gran == 1:
+            df = df_1_min
+        # Change the granularity of the data
+        else:
+            print('Changing scraped data granularity from 1 minute to ' +
+                  str(gran) + ' minutes.')
+            scraped_df = self._change_granularity(scraped_df)
+
+            # check if older data is needed, fetch or create binary file associated with gran
+            if min(scraped_df.index) < end_date:
+                # Load the binary file associated with the desired granularity
                 try:
-                    # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-                    def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-                    cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-                    orig_df = pd.read_csv(f_paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
-                    name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
-                    orig_df.rename(columns= name_map, inplace=True)
-                    orig_df.set_index('Timestamp', inplace = True, drop = True)
-
-                    assert not orig_df.empty
-
-                    df = df.append(orig_df, sort = True)
-                    df.sort_index(inplace = True) #apparently this is necessary otherwise the orig_df is in reverse order
-                    print(df.head())
-                    print(df.tail())
-                    
-                    # self.save_candle_data() # This function currently tries to append to self.candle_df. Better to just write to file. 
-                    print('Data written to binary file.')
+                    df = df.append(pd.read_pickle(f_paths['cum data pickle']+str(gran)+'.pkl'), sort=True)
+                # If file not found, convert the 1 minute df into the desired granularity
                 except FileNotFoundError:
-                    print('Please download the csv historical data file from kaggle.')
-                    raise(FileNotFoundError)
+                    print('Changing full 1 minute dataset granularity to ' +
+                          str(gran) + ' minutes.')
+                    df = self._change_granularity(df_1_min)
+                
+                df = self._format_df(df)
+                df.to_pickle(f_paths['cum data pickle'] +
+                             str(gran) + '.pkl')
 
-            assert not df.empty
             print(df.head())
-            df.to_pickle(f_paths['cum data pickle'])
-            print('Success fetching from cumulative data repository. Data written to file.')
-            # df.set_index('TimeStamp', drop = True, inplace = True)
 
         # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
         # print(df.index.min())
         # print(start_date)
 
-        assert(df.index.min() <= start_date)
-
-        # # Drop undesired currencies
-        # for col in df.columns:
-        #     market = 'USD-' + col[0:3] #should result in 'USD-ETH' or similar
-        #     # Drop column if necessary
-        #     if not market in self.markets: df.drop(columns=[col], inplace = True)
-
-        # print('Here is the most recent candle info I gathered: ')
-        # print(df.tail(1))
-        df = df.loc[df.index > start_date + timedelta(hours = 7)]
-        df = df.loc[df.index < end_date + timedelta(hours = 7)]
-        # print('Here is the most recent candle info in the candle df:')
-        # print(df.tail(1))
         self.candle_df = self._format_df(df) # Completely resets the candle_df
-        self._change_df_granularity()
 
 
     def _format_df(self, df):
@@ -224,79 +275,57 @@ class ExchangeEnvironment:
         return formatted_df.dropna()
 
 
-    def _change_df_granularity(self):
-        """This function looks at the Date columns of the df and modifies the df according to the input granularity (in minutes).
-        This could possibly be imporved in the future with the ".resample()" method."""
-
+    def _change_granularity(self, input_df):
+        """This function looks at the Date columns of the df and modifies the df according to the granularity (in minutes).
+        This function expects self.granularity to be an positive int <= 60*24"""
+        df = input_df.copy()
         gran = self.granularity
-        print('Changing data granularity from 1 minute to '+ str(gran) + ' minutes.')
+        if gran == 1:
+            print("Granularity is set to 1 minute.")
+        else:
+            new_df = pd.DataFrame(columns = df.columns)
+            df = df.copy()
+            start = df.index[0]
+            oldest = max(df.index)
 
-        # if input_df.index[1] - input_df.index[0] == timedelta(minutes = 1): #verified this works
-        # n_row, n_col = self.candle_df.shape
-        # df = pd.DataFrame()
-        # for i in range(int(n_row/gran)):
-        #     slice = self.candle_df.iloc[i*gran:(i+1)*gran]
-        #     open = slice['BTCOpen'].iloc[0]
-        #     high = slice['BTCHigh'].max()
-        #     low = slice['BTCLow'].min()
-        #     close = slice['BTCClose'].iloc[-1]
-        #     volume = slice['BTCVolume'].sum()
-        #     timestamp = slice.iloc[-1].name
-        #     candle = pd.DataFrame({'BTCOpen': close, 'BTCHigh': high, 'BTCLow': low, 'BTCClose': close, 'BTCVolume': volume}, index = [timestamp])
-        #     # print(candle)
-        #     # candle.set_index('Timestamp', inplace = True, drop = True)
-        #     df = df.append(candle)
-        #
-        # print(df.head())
-        # self.df = df
-        self.granularity = gran
-        self.candle_df =  self.candle_df.iloc[::gran, :]
-        self.candle_df = self._format_df(self.candle_df)
-        # else:
-            # print('Granularity of df input to change_df_granularity was not 1 minute.')
-            # raise(ValueError)
-            # return input_df
+            # TO DO: make it aligned to start at a 10 min interval
+            #Loop over the entire dataframe. assumption is that candle df is in 1 min intervals
+            # Initial call to print 0% progress
+            length = df.shape[0]
+            i = 0
+            while True:
+                printProgressBar(i, length, prefix='Progress:', suffix='Complete')
 
+                end = start + timedelta(minutes=gran)
 
-    def save_candle_data(self):
-        # This function writes the information in the original format to the csv file
-        # including new datapoints that have been fetched
+                data = df.loc[(df.index >= start) & (df.index < end)]
+                # print('data')
+                # print(data.head())
+                try:
+                    o = data.iloc[0]['BTCOpen']
+                    h = max(data['BTCHigh'])
+                    l = min(data['BTCLow'])
+                    c = data.iloc[-1]['BTCClose']
+                    v = sum(data['BTCVolume'])
+                    close_time = end                 # Note that timestamps are the close time
+                    candle = pd.DataFrame({'BTCOpen': o, 'BTCHigh': h, 'BTCLow': l, 'BTCClose': c, 'BTCVolume': v}, index = [close_time])
+                    new_df = new_df.append(candle)
+                # Handle empty slices (ignore)
+                except IndexError:  
+                    pass
+                if end >= oldest: break
+                # print("new_df: ")
+                # print(new_df.head())
+                start += timedelta(minutes=gran)
+                # This is for printing the progress bar
+                try:
+                    i = df.index.get_loc(start)
+                except KeyError:
+                    pass
 
-        print("Writing data to file.")
-        path = f_paths['cum data pickle']
-        old_df = pd.read_pickle(path)
-        df_to_save = self.candle_df.append(old_df)
-        df_to_save.to_pickle(path)
-        # print('Writing data to CSV.')
-
-        # path = f_paths['cum data csv']
-
-        # # datetimes to strings
-        # print('Fetching data from the download file...', end = ' ')
-        # # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-
-        # def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-        # cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-        # orig_df = pd.read_csv(f_paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
-
-        # name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
-        # orig_df.rename(columns= name_map, inplace=True)
-        # orig_df.set_index('Timestamp', inplace = True, drop = True)
-        # print('Fetched.')
-        # df_to_save = self.df.append(orig_df, sort = True)
-
-        # #Drop features and indicators, all non savable data
-        # for col in df_to_save.columns:
-        #     if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
-        #         df_to_save.drop(col, axis = 1, inplace = True)
-
-        # df_to_save = self._format_df(df_to_save)
-
-        # # df_to_save = filter_error_from_download_data(df_to_save)
-        # df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
-
-        # # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
-        # print('Data written.')
+            print('Dataframe with updated granularity:')
+            print(df.head())
+            return df
 
 
     def test_data_stationarity(self):
@@ -314,7 +343,7 @@ class ExchangeEnvironment:
         cols = transformed_df.columns
         for i in range(2*self.n_asset): #loop through prices and volumnes
             col = cols[i]
-            transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1)
+            transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1, fillna=0)
 
         # transformed_df.drop(transformed_df.index[0], inplace = True)
 
@@ -419,8 +448,7 @@ class ExchangeEnvironment:
 
 
 class SimulatedCryptoExchange(ExchangeEnvironment):
-    """
-    A multi-asset trading environment.
+    """A multi-asset trading environment.
     For now this has been adopted for only one asset.
     Below shows how to add more.
     The state size and the aciton size throughout the rest of this
@@ -430,8 +458,13 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
       - associated indicators for each asset
     """
 
-    def __init__(self, start = datetime.now() - timedelta(days = 9), end = datetime.now(), initial_investment=100):
-        ExchangeEnvironment.__init__(self)
+    def __init__(self, 
+                start = datetime.now() - timedelta(days = 9), 
+                end = datetime.now(),
+                initial_investment=100,
+                granularity=1,   # in minutes
+                feature_list=None):
+        super().__init__(granularity)
 
         """The data, for asset_data can be thought of as nested arrays, where indexing the
         highest order array gives a snapshot of all data at a particular time, and information at the point
@@ -442,11 +475,8 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         print(self.candle_df.head())
         print(self.candle_df.tail())
         #Convention here is string key, list of hyperparams typically for multiple of the feature type
-        features = {#'sign': ['Close', 'Volume'], 
-                    'EMA': [50,80,130],
-                    'time of day': [],
-                    'stack': [1]}                  # This is how many of the previous states to include
-        self.df = build_features(self.candle_df, self.markets, features) # This fills in the asset_data array
+                       # This is how many of the previous states to include
+        self.df = build_features(self.candle_df, self.markets, feature_list) # This fills in the asset_data array
         self.asset_data = self.df.values
         print('PREPARED DATA:')
         print(self.df.head())
@@ -655,8 +685,12 @@ class BittrexExchange(ExchangeEnvironment):
     logging account value over time, displaying account value over time, retrieving information on prices, balances, and orders from
     Bittrex, and uses a similar 'act' method to interface with agents."""
 
-    def __init__(self, money_to_use=10):
-        ExchangeEnvironment.__init__(self)
+    def __init__(self, 
+                granularity=1,   # in minutes
+                feature_list=None,
+                money_to_use=10):
+
+        super.__init__(self, granularity)
 
         # instance attributes
         self.initial_investment = money_to_use

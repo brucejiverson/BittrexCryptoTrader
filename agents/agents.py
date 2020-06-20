@@ -1,6 +1,6 @@
 import numpy as np
 import warnings
-from environments import f_paths
+from environments.environments import f_paths
 import pickle
 
 
@@ -22,7 +22,8 @@ class LinearModel:
     def predict(self, X):
         # make sure X is N x D
         # throw error if X not 2D to abide by (skikitlearn dimensionality convention)
-        assert(len(X.shape) == 2)
+        assert(len(X.shape) == 2)    sim_env = SimulatedCryptoExchange(start, end, initial_investment=initial_investment)
+
         return X.dot(self.W) + self.b
 
     def sgd(self, X, Y, learning_rate=0.0025, momentum=0.4):
@@ -229,8 +230,8 @@ class ClassificationAgent():
 
         #Load the weights
         path = f_paths['models'] + '/classification.pkl'
-        with open(path, 'rb') as file:
-            self.model = pickle.load(file)
+        # with open(path, 'rb') as file:
+        #     self.model = pickle.load(file)
 
     def act(self, state):
 
@@ -351,7 +352,7 @@ class MarketTester():
         return action
 
 
-class BenchMarker:
+class BenchMarker():
     """For now, this just uses the Renko strategy. Eventually,
     this should take in a string parameter that dictates which
     benchmarking strategy is used.

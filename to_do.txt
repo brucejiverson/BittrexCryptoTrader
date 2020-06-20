@@ -1,17 +1,15 @@
 Whats Bruce working on?
 
-    - Make granularity a passable hyperparameter
-        - additionally, the features to construct
+    - integrate predictors into build_features
+        - unify predictors?
+    - fix logging
+    - switch classifers to percent change
+
+    - Try feature analysis 
     - Instead of pandas datetime, use regular datetime objects (deprecated data type)
-    - Make change granularity work with candle data
     - Add limit orders to environments 
         - Probably involves adding a 'type' attribute to the action
         - This actually requires a more sophiticated set of logic 
-
-    - predictors
-        - integrate
-            
-        - fix error with nas
 
     - Standardize agents
         - Agents should pass required/desired features to the environment 
@@ -25,6 +23,14 @@ Whats Bruce working on?
     - Data scraping
         - Incorporate order book logging
     - Incorporate limit orders in backtesting simulations
+        - Change how actions are passed
+    - Look at how trades are executed in real exchange, I think we can combined some functions
+
+    ----DEMO FUNCTIONALITY----
+    - Quickly view data with features
+    - quick comparison of features
+    - backtest quickly and easily comparing two agents
+    - Execute a trade from command line
 
     ----ICEBOX----
     - improve mean reversion agent
@@ -107,8 +113,39 @@ project
             - run live
             - paper trade
 
-
 Done: (started log on 6/14)
+- Make change granularity work
+        - fix volume (too high??)
+        - changing gran is a really long process. 
+            - Done: try to load file 
+            - Done: else do the long process 
+                - save as file
+            - pass the df to change_gran()
+        - make certain that the csv file is never overwritten
+        - algorithm pseudocode:
+            - scrape the latest data
+            - try:
+                - save to the 1 min binary file
+            - except 
+                - load from csv
+            - if gran not 1 
+                - change gran of scraped data
+            - if date range doesnt overlaps more than scraped data
+                - try 
+                    -load existing binary file for the chosen granularity
+                -except 
+                    - change gran of 1 min df
+                - combine scraped and loaded -- needs validation
+                - save to file
+            - filter for the correct date range, return
+        -validation process:
+            - purge all binary files (done)
+            - run with 1 min gran (populates 1 min file) (done)
+            - run with 5 min gran (done)
+- add tools folder
+- add progress bar
+- Made granularity and featurelist passable to exchange for later hyperparameter searching
+- Reorg file strucutre
 - Shared x axis on plots
 - Switch to all to pickling and one data file https://stackoverflow.com/questions/37010212/what-is-the-fastest-way-to-upload-a-big-csv-file-in-notebook-to-work-with-python
         - When I look at up_df right after it gets read, its not candle data, and includes features. Somehow, it got overwritten with the wrong data. 

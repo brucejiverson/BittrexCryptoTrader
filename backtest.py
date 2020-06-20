@@ -1,7 +1,7 @@
 from bittrex.bittrex import *
-from agents import *
-from environments import *
-
+from agents.agents import *
+from environments.environments import *
+from tools.tools import *
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -137,7 +137,11 @@ if __name__ == '__main__':
 
     batch_size = 32  # sampleing from replay memory
     initial_investment = 100
-    sim_env = SimulatedCryptoExchange(start, end, initial_investment = initial_investment)
+    features = {    # 'sign': ['Close', 'Volume'],
+        'EMA': [50, 80, 130],
+        'time of day': [],
+        'stack': [1]}
+    sim_env = SimulatedCryptoExchange(start, end, granularity=1, feature_list=features)
     # sim_env.save_data()
     # print(sim_env.df.head())
 
@@ -174,7 +178,7 @@ if __name__ == '__main__':
 
     # play the game num_episodes times
     for e in range(num_episodes):
-
+        printProgressBar(e, num_episodes, prefix='Progress:', suffix='Complete')
         t0 = datetime.now()
 
         #If you're playing the last episode, create a log

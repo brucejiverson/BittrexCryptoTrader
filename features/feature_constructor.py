@@ -140,16 +140,19 @@ def stack(n, df):
 
 def build_features(candle_df, markets, feature_dict):
         """This method takes the raw candle data and constructs features based on the provided list of strings"""
-
+        
+        print('Constructing features... ', end = ' ')
+        
+        if feature_dict is None:
+            print('no features built.')
+            return candle_df
         df = candle_df.copy()       # At this higher level, it is safer to construct a new dataframe instead of modifying the one that gets passed.
-
         #This section constructs engineered features and adds them as columns to the df
         """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
 
-        print('Constructing features... ', end = ' ')
-
         # Check for illegal values
-        acceptable_feature_names = ['sign', 'OBV', 'EMA', 'MACD', 'RSI', 'sentiment', 'renko', 'time of day', 'stack']
+        acceptable_feature_names = ['sign', 'OBV', 'EMA', 'MACD', 'RSI', 'sentiment', 'renko', 'time of day', 
+                                    'knn', 'mlp', 'ridge', 'stack']
         for f in feature_dict:           # Iterate over the keys
             if not f in acceptable_feature_names:
                 print('An unrecognized feature has been passed to the feature contructor (not in the acceptable feature list).')
