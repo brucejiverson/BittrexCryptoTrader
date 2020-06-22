@@ -11,6 +11,7 @@ Whats Bruce working on?
         - Probably involves adding a 'type' attribute to the action
         - This actually requires a more sophiticated set of logic 
 
+    - initialize all functions and classes with a proper descript (take from progress bar)
     - Standardize agents
         - Agents should pass required/desired features to the environment 
             - This requires separation of feature construction
@@ -20,6 +21,8 @@ Whats Bruce working on?
 
     - Notion of "experiments"
         - Design experiment to map the probability of a trade going through as a function of price
+            - add order book retrieval to exchange class
+            - 
     - Data scraping
         - Incorporate order book logging
     - Incorporate limit orders in backtesting simulations

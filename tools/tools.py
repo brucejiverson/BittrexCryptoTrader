@@ -20,7 +20,7 @@ f_paths = linux_paths
 
 
 # Print iterations progress
-def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=75, fill='█', printEnd="\r"):
+def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█', printEnd="\r"):
     """
     Call in a loop to create terminal progress bar
     @params:
@@ -33,8 +33,8 @@ def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=
         fill        - Optional  : bar fill character (Str)
         printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
     """
-    if iteration == 0:
-        print()
+    # if iteration == 0:
+        # print()
     percent = ("{0:." + str(decimals) + "f}").format(100 *
                                                      (iteration / float(total)))
     filledLength = int(length * iteration // total)

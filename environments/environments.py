@@ -103,23 +103,27 @@ class ExchangeEnvironment(object):
 
         print('Fetching historical data...')
 
-        # - algorithm pseudocode:
-        #     - scrape the latest data
-        #     - try:
-        #         - load to the 1 min binary file
-        #     - except
-        #       - load from csv
-        #     - save to 1 min file
-        #     - filter for the correct date range
-        #     - if gran not 1
-        #       - change gran of scraped data
-        #     - if date range doesnt overlaps more than scraped data
-        #        - try
-        #           -load existing binary file for the chosen granularity
-        #         -except
-        #           - change gran of 1 min df
-        #         - combine scraped and loaded - - needs validation
-        #         - save to file
+        """algorithm pseudocode:
+        scrape the latest data
+        try:
+            load to the 1 min binary file
+        except
+            load from csv
+        save to 1 min file
+        if gran  1
+            filter date range
+            return 1 min data
+        try
+            find the full daterange of binary gran file
+            get the 1 min data outside of the binary gran file daterange
+            change the granularity on the 1 min data
+        except FileNotFound
+            convert all of the 1 min data into gran 
+        append to binary gran file
+        save
+        filter date range
+        return
+        """
 
         def fetch_csv():
             try:
@@ -217,45 +221,42 @@ class ExchangeEnvironment(object):
             if not market in self.markets:
                 df_1_min.drop(columns=[col], inplace=True)
         
-        # print('Here is the most recent candle info I gathered: ')
-        # print(df_1_min.tail(1))
-        df_1_min = df_1_min.loc[df_1_min.index > start_date + timedelta(hours = 7)]
-        df_1_min = df_1_min.loc[df_1_min.index < end_date + timedelta(hours = 7)]
-        # print('Here is the most recent candle info in the candle df_1_min:')
-        # print(df_1_min.tail(1))
-
-        df = pd.DataFrame()                         # This is the dataframe that will
+        df_gran = pd.DataFrame()                         # This is the dataframe that will
         gran = self.granularity
         if gran == 1:
-            df = df_1_min
+            df_1_min = df_1_min.loc[df_1_min.index >
+                                    start_date + timedelta(hours=7)]
+            df_1_min = df_1_min.loc[df_1_min.index < end_date + timedelta(hours=7)]
+            self.candle_df =  self._format_df(df_1_min)
+            return
         # Change the granularity of the data
-        else:
-            print('Changing scraped data granularity from 1 minute to ' +
-                  str(gran) + ' minutes.')
-            scraped_df = self._change_granularity(scraped_df)
+        gran_path = f_paths['cum data pickle']+str(gran)+'.pkl'
+        try:
+            df_gran = df_gran.append(pd.read_pickle(gran_path), sort=True)
+            df_gran = self._format_df(df_gran)
+            # find the full daterange of binary gran file
+            data_end = df_gran.index[-1]
 
-            # check if older data is needed, fetch or create binary file associated with gran
-            if min(scraped_df.index) < end_date:
-                # Load the binary file associated with the desired granularity
-                try:
-                    df = df.append(pd.read_pickle(f_paths['cum data pickle']+str(gran)+'.pkl'), sort=True)
-                # If file not found, convert the 1 minute df into the desired granularity
-                except FileNotFoundError:
-                    print('Changing full 1 minute dataset granularity to ' +
-                          str(gran) + ' minutes.')
-                    df = self._change_granularity(df_1_min)
-                
-                df = self._format_df(df)
-                df.to_pickle(f_paths['cum data pickle'] +
-                             str(gran) + '.pkl')
+            # Get the 1 minute data that is outside of the daterange
+            df_to_filter = df_1_min.loc[(df_1_min.index >= data_end - timedelta(minutes=gran+1))]
 
-            print(df.head())
+        # If file not found, convert the 1 minute df_gran into the desired granularity
+        except FileNotFoundError:
+            print('Changing full 1 minute dataset granularity to ' +
+                    str(gran) + ' minutes.')
+            
+            df_to_filter = df_1_min.copy()
 
-        # Double check that we have a correct date date range. Note: will still be triggered if missing the exact data point
-        # print(df.index.min())
-        # print(start_date)
-
-        self.candle_df = self._format_df(df) # Completely resets the candle_df
+        filtered = self._change_granularity(df_to_filter)
+        df_gran = df_gran.append(filtered, sort=True)
+        print('')
+        df_gran = self._format_df(df_gran)
+        df_gran.to_pickle(gran_path)
+        # Filter df_gran
+        df_gran = df_gran.loc[df_gran.index >
+                              start_date + timedelta(hours=7)]
+        self.candle_df = df_gran # Completely resets the candle_df
+        return
 
 
     def _format_df(self, df):
@@ -282,50 +283,50 @@ class ExchangeEnvironment(object):
         gran = self.granularity
         if gran == 1:
             print("Granularity is set to 1 minute.")
-        else:
-            new_df = pd.DataFrame(columns = df.columns)
-            df = df.copy()
-            start = df.index[0]
-            oldest = max(df.index)
-
-            # TO DO: make it aligned to start at a 10 min interval
-            #Loop over the entire dataframe. assumption is that candle df is in 1 min intervals
-            # Initial call to print 0% progress
-            length = df.shape[0]
-            i = 0
-            while True:
-                printProgressBar(i, length, prefix='Progress:', suffix='Complete')
-
-                end = start + timedelta(minutes=gran)
-
-                data = df.loc[(df.index >= start) & (df.index < end)]
-                # print('data')
-                # print(data.head())
-                try:
-                    o = data.iloc[0]['BTCOpen']
-                    h = max(data['BTCHigh'])
-                    l = min(data['BTCLow'])
-                    c = data.iloc[-1]['BTCClose']
-                    v = sum(data['BTCVolume'])
-                    close_time = end                 # Note that timestamps are the close time
-                    candle = pd.DataFrame({'BTCOpen': o, 'BTCHigh': h, 'BTCLow': l, 'BTCClose': c, 'BTCVolume': v}, index = [close_time])
-                    new_df = new_df.append(candle)
-                # Handle empty slices (ignore)
-                except IndexError:  
-                    pass
-                if end >= oldest: break
-                # print("new_df: ")
-                # print(new_df.head())
-                start += timedelta(minutes=gran)
-                # This is for printing the progress bar
-                try:
-                    i = df.index.get_loc(start)
-                except KeyError:
-                    pass
-
-            print('Dataframe with updated granularity:')
-            print(df.head())
             return df
+
+        new_df = pd.DataFrame(columns = df.columns)
+        start = df.index[0]
+        m = start.minute
+        start += timedelta(minutes=(gran - m))
+        
+        oldest = max(df.index)
+
+        #Loop over the entire dataframe. assumption is that candle df is in 1 min intervals
+        length = df.shape[0]
+        i = 0
+        while True:
+            printProgressBar(i, length, prefix='Progress:', suffix='Complete')
+
+            end = start + timedelta(minutes=gran-1)
+            data = df.loc[(df.index >= start) & (df.index <= end)]
+            
+            try:   
+                # Note that timestamps are the close time
+                candle = pd.DataFrame({'BTCOpen': data.iloc[0]['BTCOpen'],
+                                        'BTCHigh': max(data['BTCHigh']),
+                                        'BTCLow': min(data['BTCLow']),
+                                        'BTCClose': data.iloc[-1]['BTCClose'],
+                                        'BTCVolume': sum(data['BTCVolume'])},
+                                        index=[end])
+                new_df = new_df.append(candle)
+            # Handle empty slices (ignore)
+            except IndexError:
+                pass
+            if end >= oldest: break
+            # print("new_df: ")
+            # print(new_df.head())
+            start += timedelta(minutes=gran)
+            # This is for printing the progress bar
+            try:
+                i = df.index.get_loc(start)
+            except KeyError:
+                pass
+        
+        # print('')
+        # print('Dataframe with updated granularity:')
+        # print(new_df.head())
+        return new_df
 
 
     def test_data_stationarity(self):
@@ -433,7 +434,8 @@ class ExchangeEnvironment(object):
         assert not self.df.empty
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)  # Create the figure
 
-        for market in self.markets:
+        print(self.df.head())
+        for market in self.markets: 
             token = market[4:7]
 
             market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
@@ -464,6 +466,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                 initial_investment=100,
                 granularity=1,   # in minutes
                 feature_list=None):
+                
         super().__init__(granularity)
 
         """The data, for asset_data can be thought of as nested arrays, where indexing the
@@ -1222,6 +1225,46 @@ class BittrexExchange(ExchangeEnvironment):
             print('Order log is empty.')
         print('Data written to test trade log.')
         print(old_df)
+
+    def save_candle_data(self):
+        # This function writes the information in the original format to the csv file
+        # including new datapoints that have been fetched
+
+        print("Writing data to file.")
+        path = f_paths['cum data pickle']
+        old_df = pd.read_pickle(path)
+        df_to_save = self.candle_df.append(old_df)
+        df_to_save.to_pickle(path)
+        # print('Writing data to CSV.')
+
+        # path = f_paths['cum data csv']
+
+        # # datetimes to strings
+        # print('Fetching data from the download file...', end = ' ')
+        # # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
+
+        # def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
+        # cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
+        # orig_df = pd.read_csv(f_paths['downloaded csv'], usecols=cols_to_use, parse_dates = ['Timestamp'], date_parser=dateparse)
+
+        # name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow', 'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
+        # orig_df.rename(columns= name_map, inplace=True)
+        # orig_df.set_index('Timestamp', inplace = True, drop = True)
+        # print('Fetched.')
+        # df_to_save = self.df.append(orig_df, sort = True)
+
+        # #Drop features and indicators, all non savable data
+        # for col in df_to_save.columns:
+        #     if not col[3::] in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        #         df_to_save.drop(col, axis = 1, inplace = True)
+
+        # df_to_save = self._format_df(df_to_save)
+
+        # # df_to_save = filter_error_from_download_data(df_to_save)
+        # df_to_save.to_csv(path, index = True, index_label = 'TimeStamp', date_format = "%Y-%m-%d %I-%p-%M")
+
+        # # df.Date = pd.to_datetime(df.Date, format="%Y-%m-%d %I-%p-%M")               # added this so it doesnt change if passed by object... might be wrong but appears to make a difference. Still dont have a great grasp on pass by obj ref.``
+        # print('Data written.')
 
 
 if __name__ == '__main__':
