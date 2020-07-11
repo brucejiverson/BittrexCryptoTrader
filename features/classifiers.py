@@ -1,130 +1,45 @@
 import numpy as np
+from features.predictor import Predictor
+from tools.tools import f_paths, percent_change_column
 from datetime import datetime, timedelta
 import argparse
 import matplotlib.pyplot as plt
 import pickle
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import PolynomialFeatures
-from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import LinearSVC
 from sklearn.pipeline import Pipeline
-# from sklearn.externals import joblib
-from environments.environments import SimulatedCryptoExchange, f_paths
 
 
-class knn_classifier():
+class knn_classifier(Predictor):
     """Constructs a knn classifier from the df passed. Hyperparameters should be a 
     dictionary, parameters are k, polynomial degrees. Note that this calculates 
     percentage change, not simple time differencing, as it makes the threshold more intuitive. 
     (temporarily changed as it was causing problems)"""
 
-    def __init__(self, token, hyperparams, n_predictions=1, split=False, plot=False):
-        self.hyperparams = hyperparams
-        self.n_predictions = n_predictions
+    def __init__(self, token, hyperparams, n_predictions=1):
+        super().__init__(hyperparams, n_predictions)
+        self.name = 'knn'
+        self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
+        self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
+        print(f"Hyperparams: {hyperparams}")
 
-    def train(self, input_df):
-        """Train on all data"""
-        df = input_df.copy()
-        y_names = []
-
-        # df.dropna(inplace=True)#fillna(method='ffill',inplace=True)
-        # df = df[~df.isin([np.nan, np.inf, -np.inf]).any(1)] # removes all nan, inf, -inf values
-        df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-        # print(df.isnull().values.any())
-        thresh = 0.005
-        #Calculate what the next price will be
-        for i in range(self.n_predictions):
-            step = (i+1)  # *-1
-            y_names.append('Step ' + str(step) + ' % Change')
-            series = (df['BTCClose'].shift(-step) -
-                    df['BTCClose'])  # /df['BTCClose']
-            labels = np.empty_like(series.values)
-            for j, item in enumerate(series):
-                if item > thresh:
-                    labels[j] = 1
-                else:
-                    labels[j] = 0
-            # for item in :
-            df[y_names[i]] = labels
-            # df[y_names[i]] = df['BTCClose'].shift(-step) - df['BTCClose']     #/df['BTCClose']
-
-        # These do time differencing for data stationarity
-        # df['Last BTCClose'] = df['BTCClose'].shift(1) - df['BTCClose'].shift(2)
-        price_name = token + 'Close'
-        vol_name = token + 'Volume'
-        df[price_name] = df[price_name] - \
-            df[price_name].shift(1, fill_value=0)  # /df[price_name]
-        df[vol_name] = df[vol_name] - \
-            df[vol_name].shift(1, fill_value=0)  # /df[vol_name]
-
-        # print(df.isnull().values.any())
-        # df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-
-        features_to_use = list(df.columns)
-        # Remove the y labels from the 'features to use'
-        for i in range(self.n_predictions):
-            features_to_use.remove(y_names[i])
-
-        X = df[features_to_use].values
-        y = df[y_names].values
-
-        print(hyperparams)
-        k = hyperparams['k'][0]
-        degree = hyperparams['degrees'][2]
+        scaler = StandardScaler()
+        degree = hyperparams['polynomial_features__degree'][0]
         polynomial_features = PolynomialFeatures(degree=degree)
 
+        k = hyperparams['knn__n_neighbors'][0]
         knn = KNeighborsClassifier(n_neighbors=k)
 
         # The pipeline can be used as any other estimator
         # and avoids leaking the test set into the train set
-        pipe = Pipeline([('polynomial_features', polynomial_features),
+        self.model = Pipeline([
+                        ('scaler', scaler),
+                        ('polynomial_features', polynomial_features),
                         ('knn', knn)])
-
-        n_rows, n_cols = X.shape
-        print(f'Training knn classifier on {n_cols} features...')
-
-        pipe.fit(X, y.ravel())
-
-        score = pipe.score(X, y)
-        print(f"KNN mean accuracy score on all data: {round(score, 3)}.")
-        y_predict = pipe.predict(X)
-
-        # for i in range(self.n_predictions):
-        #     col = y_names[i]
-        #     temp = testing[new_df[col] > thresh]                        #The real values for all predictions greate than 0
-        #     n_pred_over_0,y.ravel())
-
-        score = pipe.score(X, y)
-        print(f"KNN mean accuracy score on input training data: {round(score, 3)}.")
-        y_predict = pipe.predict(X)
-        n_col = temp.shape
-        n_success, n_col  = temp[temp[col] > thresh].shape
-
-        print(f'Out of {n_pred_over_0} predictions the price will be over {thresh}, ', end = '')
-        print(f'{100*round(n_success/n_pred_over_0,2)}% were above that threshhold.')
-
-
-    def optimize_parameters(self, df):
-        pass 
-
-
-    def build_feature(self, input_df):
-        df[token + 'knn'] = y_predict
-        return df
-        
-
-
-    def save(self):
-        pass
-
-
-    def load(self):
-        # Load the config/hyperparams
-
-        # Load the model
-
-        pass
 
 
     def plot_results(self):
@@ -148,148 +63,113 @@ class knn_classifier():
         # plt.show()
 
 
-def mlp_classifier(input_df, token, hyperparams, n_predictions=1, split=False, plot=False, param_search=False):
+class mlp_classifier(Predictor):
     """Constructs a knn classifier from the df passed. Hyperparameters should be a 
     dictionary, parameters are k, polynomial degrees. Note that this calculates 
-    percentage change, not simple time differencing, as it makes the threshold more intuitive."""
-    df = input_df.copy()
-    y_names = []
+    percentage change, not simple time differencing, as it makes the threshold more intuitive. 
+    (temporarily changed as it was causing problems)"""
 
-    thresh = 0.005
-    #Calculate what the next price will be
-    for i in range(n_predictions):
-        step = (i+1)#*-1
-        y_names.append('Step ' + str(step) + ' % Change')
-        series = (df['BTCClose'].shift(-step) - df['BTCClose'])#/df['BTCClose']
-        labels = np.empty_like(series.values)
-        for j, item in enumerate(series):
-            if item > thresh:
-                labels[j] = 1
-            else: 
-                labels[j] = 0
-        # for item in :
-        df[y_names[i]] = labels
-        # df[y_names[i]] = df['BTCClose'].shift(-step) - df['BTCClose']     #/df['BTCClose']
+    def __init__(self, token, hyperparams, n_predictions=1):
+        super().__init__(hyperparams, n_predictions)
+        self.name = 'mlp'
+        self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
+        self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
+        print(f"Hyperparams: {hyperparams}")
 
-    # These do time differencing 
-    # df['Last BTCClose'] = df['BTCClose'].shift(1) - df['BTCClose'].shift(2)
-    price_name = token + 'Close'
-    vol_name = token + 'Volume'
-    df[price_name] = df[price_name] - df[price_name].shift(1, fill_value=0)#/df[price_name]
-    df[vol_name] = df[vol_name] - df[vol_name].shift(1, fill_value=0) #/df[vol_name]
+        scaler = StandardScaler()
+        degree = hyperparams['polynomial_features__degree'][2]
+        polynomial_features = PolynomialFeatures(degree=degree)
 
-    df.dropna(inplace=True)#fillna(method='ffill',inplace=True)
-    # print(df.isnull().values.any())
-    # n_sample, n_feature = df.shape
+        mlp = MLPClassifier(alpha=1, max_iter=10000)
 
-    features_to_use = list(df.columns) # ['BTCClose', 'BTCVolume', 'BTCOBV', 'EMA_30', 'd/dt_EMA_30', 'EMA_78', 'd/dt_EMA_78']
-    # Remove the y labels from the 'features to use' 
-    for i in range(n_predictions):
-        features_to_use.remove(y_names[i])
+        # The pipeline can be used as any other estimator
+        # and avoids leaking the test set into the train set
+        self.model = Pipeline([
+                        ('scaler', scaler),
+                        ('polynomial_features', polynomial_features),
+                        ('mlp', mlp)])
 
-    X = df[features_to_use].values
-    y = df[y_names].values
 
-    degree = hyperparams['degrees'][2]
-    polynomial_features = PolynomialFeatures(degree=degree)
+class svc_classifier(Predictor):
+    """Constructs a knn classifier from the df passed. Hyperparameters should be a 
+    dictionary, parameters are k, polynomial degrees. Note that this calculates 
+    percentage change, not simple time differencing, as it makes the threshold more intuitive. 
+    (temporarily changed as it was causing problems)"""
 
-    mlp = MLPClassifier(alpha=1, max_iter=10000)
+    def __init__(self, token, hyperparams, n_predictions=1):
+        super().__init__(hyperparams, n_predictions)
+        self.name = 'svc'
+        self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
+        self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
+        print(f"Hyperparams: {hyperparams}")
 
-    # The pipeline can be used as any other estimator
-    # and avoids leaking the test set into the train set
-    pipe = Pipeline([('polynomial_features', polynomial_features), 
-                    ('mlp', mlp)])
+        scaler = StandardScaler()
+        polynomial_features = PolynomialFeatures(degree=4)
+        svc = LinearSVC(penalty='l2',
+                        C=1,
+                        dual=False,
+                        max_iter=50000)
 
-    n_rows, n_cols = X.shape
-    print(f'Training MLP classifier on {n_cols} features...')
-
-    # This is for train/test splitting for model validation
-    if split == True:
-        # Split the data into testing and training dataframes
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2) # , random_state=42)
-
-        if grid_search == True:
-            grid = GridSearchCV(pipeline, parameters, verbose=1)
-            grid.fit(X_train, y_train)
-        # else:
-        pipe.fit(X_train, y_train.ravel())
-
-        score = pipe.score(X_train, y_train)
-        print(f"MLP mean accuracy score on train data: {round(score,4)}.")
-        y_train_predict = pipe.predict(X_train)
-        score = pipe.score(X_test, y_test)
-        print(f"MLP mean accuracy score on test data: {round(score, 4)}.")
-        y_test_predict = pipe.predict(X_test)
-    # else:       # Don't split
-
-    pipe.fit(X, y.ravel())
-
-    score = pipe.score(X, y)
-    print(f"MLP mean accuracy score on all data: {round(score,4)}.")
-    y_predict = pipe.predict(X)
-
-    # for i in range(n_predictions):
-    #     col = y_names[i]
-    #     temp = testing[new_df[col] > thresh]                        #The real values for all predictions greate than 0
-    #     n_pred_over_0, n_col = temp.shape
-    #     n_success, n_col  = temp[temp[col] > thresh].shape
-
-    #     print(f'Out of {n_pred_over_0} predictions the price will be over {thresh}, ', end = '')
-    #     print(f'{100*round(n_success/n_pred_over_0,2)}% were above that threshhold.')
-    
-    # This section has not yet been configured. Not totally sure how to best show the data
-    if plot == True:
-        for i in range(n_predictions): #Loop over each time step in the future
-            fig = plt.figure()
-            ax1 = fig.add_subplot(111)
-            ax1.set_ylabel('Real Value')
-            ax1.set_xlabel('Predicted Value ' + str(i + 1) + ' timesteps forwards')
-            ax1.set_title('Performance of Linear Regression Model On Test Data')
-            if split == False:
-                plt.scatter(y_train[:,i], y_train_predict[:,i])
-            else:
-                plt.scastter(y_test[:,i], y_test_predict[:,i])
-                # df['']
-
-        plt.show()
-    
-    print(input_df.shape)
-    print(y_predict.shape)
-    input_df[token + 'MLP'] = y_predict
-    return df
+        # The pipeline can be used as any other estimator
+        # and avoids leaking the test set into the train set
+        self.model = Pipeline([
+                        ('scaler', scaler),
+                        ('polynomial_features', polynomial_features),
+                        ('svc', svc)])
 
 
 if __name__ == '__main__':
+    
+    from environments.environments import SimulatedCryptoExchange
     #date range to train on
-    end = datetime.now() - timedelta(days = 2)
-    start = end - timedelta(days = 9)
+    end = datetime(2020,7,2) #- timedelta(days = 1)
+    start = end - timedelta(days = 12)
     features = {  # 'sign': ['Close', 'Volume'],
         'EMA': [50, 80, 130],
+        'OBV': [],
+        'high': [],
+        'low': [],
+        'BollingerBands': [],
         'time of day': [],
-        'stack': [1]}
-    sim_env = SimulatedCryptoExchange(granularity=30, feature_list=features)
+        # 'stack': [0]
+        }
+    sim_env = SimulatedCryptoExchange(granularity=120, feature_dict=features)
 
     df = sim_env.df.copy()              # This is the dataframe with all of the features built.
 
     print('Testing all classifiers...')
     token = 'BTC'
     # Hyperparameters
-    hyperparams = {'degrees': (1, 2, 3, 4, 5), 'k': (7,)}
-    knn = knn_classifier(token, hyperparams, split=True, plot=False)
-    # knn.optimize_parameters(df)
-    knn.train(df)
+    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4), 
+                    'knn__n_neighbors': (2, 3, 4, 5, 6, 7)}
+    knn = knn_classifier(token, hyperparams)
+    # knn.load()
+    knn.optimize_parameters(df)
+    # knn.train(df)
+    df = knn.build_feature(df)
+    df, new_name = percent_change_column('BTCClose', df, -1)
+    # print(df.head(40))
+    knn.save()
 
-    hyperparams = {'degrees': (1, 2, 3, 4, 5)}
-    df = mlp_classifier(df, token, hyperparams, split=True, plot=False, param_search=True)
-    print('Data with classifiers:')
-    print(df.head())
+    # hyperparams = {'polynomial_features__degree': (1, 2, 3, 4),
+    #                 'svc__penalty': ['l1', 'l2'],
+    #                 'svc__C': [.5, .75, 1],
+    #                 # 'svc__max_iter': [50000]
+    #                 }    
+    #                 # strength of regularization is inversely proportional to C
+    # svc = svc_classifier(token, hyperparams)
+    # # svc.load()
+    # svc.optimize_parameters(df)
+    # # svc.train(df)
+    # df = svc.build_feature(df)
+    # # print(df.head())
+    # svc.save()
 
-    # parameters = {'tfidf__ngram_range': [(1, 1), (1, 2)],
-    #               'tfidf__use_idf': (True, False),
-    #               'tfidf__max_df': [0.25, 0.5, 0.75, 1.0],
-    #               'tfidf__max_features': [10, 50, 100, 250, 500, 1000, None],
-    #               'tfidf__stop_words': ('english', None),
-    #               'tfidf__smooth_idf': (True, False),
-    #               'tfidf__norm': ('l1', 'l2', None),
-    #               }
-
+    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4)}
+    mlp = mlp_classifier(token, hyperparams)
+    # mlp.load()
+    mlp.optimize_parameters(df)
+    # mlp.train(df)
+    df = mlp.build_feature(df)
+    # print(df.head())
+    mlp.save()

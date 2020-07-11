@@ -1,25 +1,34 @@
-f_paths = {'downloaded csv': 'C:/Python Programs/crypto_trader/data/bitstampUSD_1-min_data_2012-01-01_to_2020-04-22.csv',
-           'cum data pickle': 'C:/Python Programs/crypto_trader/data/cum_data.pkl',
-           'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-           'rewards': 'agent-rewards',
-           'models': 'agent-models',
-           'order log': 'C:/Python Programs/crypto_trader/agent_logging/order_log.csv',
-           'test trade log':  'C:/Python Programs/crypto_trader/agent_logging/trade_testingBTCUSD.csv',
-           'logging': 'C:/Python Programs/crypto_trader/agent_logging/live_account_log.csv'}
+import os
 
-linux_paths = {'downloaded csv': '/home/bruce/AlgoTrader/data/bitstampUSD_1-min_data_2012-01-01_to_2020-04-22.csv',
-               'cum data pickle': '/home/bruce/AlgoTrader/data/cum_data_gran_',
+project_path = 'C:/Python Programs/crypto_trader'
+f_paths = {'downloaded csv': project_path + '/data/bitstampUSD_1-min_data_2012-01-01_to_2020-04-22.csv',
+           'cum data pickle': project_path + '/data/cum_data_gran',
+           'secret': "/Users/biver/Documents/crypto_data/secrets.json",
+           'rewards': '../agent/agent-rewards',
+           'models': '../agent/agent-models',
+           'feature_models': project_path + '/bittrex_trader/features/models',
+           'order log': project_path + '/bittrex_trader/logs/order_log.pkl',
+           'test trade log':  project_path + '/bittrex_trader/logs/trade_testingBTCUSD.pkl',
+           'live log': project_path + '/bittrex_trader/logs/live_account_log.pkl',
+           'paper log': project_path + '/bittrex_trader/logs/paper_account_log.pkl'}
+
+project_path = '/home/bruce/AlgoTrader'
+linux_paths = {'downloaded csv': project_path + '/data/bitstampUSD_1-min_data_2012-01-01_to_2020-04-22.csv',
+               'cum data pickle': project_path + '/data/cum_data_gran_',
                'secret': "/home/bruce/Documents/Crypto/secrets.json",
                'rewards': '../agents/agent-rewards',
                'models': '../agents/agent-models',
-               'order log': '/home/bruce/AlgoTrader/BittrexTrader/agent_logging/order_log.csv',
-               'test trade log': '/home/bruce/AlgoTrader/BittrexTrader/agent_logging/trade_testingBTCUSD.csv',
-               'logging': '/home/bruce/AlgoTrader/BittrexTrader/agent_logging/live_account_log.csv'}
+               'order log': project_path + '/BittrexTrader/agent_logging/order_log.csv',
+               'test trade log': project_path + '/BittrexTrader/agent_logging/trade_testingBTCUSD.csv',
+               'logging': project_path + '/BittrexTrader/agent_logging/live_account_log.csv'}
 
-f_paths = linux_paths
+# f_paths = linux_paths
+
+def ROI(initial, final):
+    # Returns the percentage increase/decrease
+    return round(final / initial - 1, 4)*100
 
 
-# Print iterations progress
 def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█', printEnd="\r"):
     """
     Call in a loop to create terminal progress bar
@@ -43,3 +52,41 @@ def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=
     # Print New Line on Complete
     if iteration == total:
         print()
+
+
+def maybe_make_dir(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        print(f'I made a directory at {directory}')
+
+
+def percent_change_column(col_name, input_df, shift_val=1):
+    """If shift_val > 0, converts the column to the percentage change.
+    if < 0, adds a new column with the future change"""
+    df = input_df.copy()
+    if shift_val > 0:
+        df[col_name] = (df[col_name] - df[col_name].shift(shift_val, fill_value=0))/df[col_name].shift(shift_val, fill_value=0)
+        df[col_name] = 100*df[col_name]
+        return df
+    elif shift_val < 0:
+        name = 'Future ' + str(shift_val) + ' % Change'
+        df[name] = (df[col_name] - df[col_name].shift(shift_val, fill_value=0))/df[col_name].shift(shift_val, fill_value=0)
+        df[name] = 100*df[name]
+        return df, name
+    else:
+        raise(ValueError)
+    
+
+# def filter_error_from_download_data(input_df):
+
+#     print('Filtering data for errors...')
+#     for i, row in input_df.iterrows():
+#         if i > 0 and i < len(input_df.Date) - 2:
+#             try:
+#                 if input_df.loc[i, 'BTCClose'] < 0.5 * mean([input_df.loc[i - 1, 'BTCClose'], input_df.loc[i + 1, 'BTCClose']]):
+#                     input_df.drop(i, axis=0, inplace=True)
+#                     print('Filtered a critical point.')
+#             except KeyError:
+#                 print(i, len(input_df.Date))
+#     input_df = format_df(input_df)
+#     return input_df #same

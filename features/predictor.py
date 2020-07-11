@@ -1,36 +1,146 @@
+import joblib
+import pickle
+import numpy as np
+import matplotlib.pyplot as plt
 
-class MLpredictor():
-    """This class serves as the basis for constructing predictors"""
-    
-    def __init__(self, name):
-        self.name = name
+from tools.tools import maybe_make_dir, percent_change_column
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV
+
+class Predictor():
+    def __init__(self, hyperparams, n_predictions):
+        self.hyperparams = hyperparams
+        self.n_predictions = n_predictions
+        self.is_classifier = True
+        self.name = None
+        self.path = None
+        self.config_path = None
         self.model = None
 
 
-    def train(self):
-        pass
+    def get_data(self, input_df, label_type):
+        """Builds labels (0, 1) as a column on the dataframe, return np arrays for X and y"""
+        df = input_df.copy()
+        y_names = []
+        token = 'BTC'
+
+        df = df[np.isfinite(df).all(1)]     # keep only finite numbers
+        # print(df.isnull().values.any())
+
+        # These do time differencing for data stationarity
+        price_name = token + 'Close'
+        vol_name = token + 'Volume'
+        df = percent_change_column(price_name, df)
+        df = percent_change_column(vol_name, df)
+        
+        if self.is_classifier:
+            thresh = 0.001
+            #Calculate what the next price will be
+            for i in range(self.n_predictions):
+                step = (i+1)  # *-1
+                y_names.append('Step ' + str(step) + ' % Change')
+                series = df['BTCClose'].shift(-step)
+                labels = np.empty_like(series.values)
+                for j, item in enumerate(series):
+                    if item > thresh:
+                        labels[j] = 1
+                    else:
+                        labels[j] = 0
+                df[y_names[i]] = labels
+        # Special label
+        # elif label_type == 'line':
+        #     # slope of the line for the next n timesteps
+        #     n = 10
+        #     temp_df = df.copy()
+        #     for i in temp_df.shape[0]:
+        #         temp_df.loc['mean', i] = temp_df.loc['BTCClose', i:i+n]/n
+
+        else:
+            #Calculate what the next price will be
+            for i in range(self.n_predictions):
+                step = (i+1)  # *-1
+                df, new_name = percent_change_column('BTCClose', df, -step)
+                y_names.append(new_name)
+
+        # print('Training data:')
+        # print(df.head(30))
+        features_to_use = list(df.columns)
+        # Remove the y labels from the 'features to use'
+        for i in range(self.n_predictions):
+            features_to_use.remove(y_names[i])
+            
+        # Make sure you aren't building a classifier based on the outputs of other classifiers
+        classifier_names = ['knn', 'mlp', 'svc', 'ridge']
+        for item in features_to_use:
+            for name in classifier_names:
+                if name in item:
+                    features_to_use.remove(item)
+
+        df = df[np.isfinite(df).all(1)]     # keep only finite numbers
+        X = df[features_to_use].values
+        y = df[y_names].values
+        return X, y
 
 
-    def save_model(self):
-        # Construct the path to save to
-        pass
+    def build_feature(self, input_df):
+        df = input_df.copy()
+        df = df[np.isfinite(df).all(1)]     # keep only finite numbers
+        X = df.values
+        try:
+            y_predict = self.model.predict(X)
+        except ValueError:
+            print('Prediction not properly trained. Training on test data set. Recommended retrain.')
+            self.optimize_parameters(df)
+            y_predict = self.model.predict(X)
+        # print(f'y_shape {y_predict.shape}')
+        df['BTC' + self.name] = y_predict
+        return df
 
 
-    def load_model(self):
-        pass
-
-
-    def predict(self):
-        """Makes a single prediction"""
-        pass
-
-
-    def build(self):
-        """Build a full feature"""
-        pass
-
-
-if __name__ == "__main__":
-
-    p = MLpredictor('knn')
+    def optimize_parameters(self, input_df):
+        """ Performs a grid search over all of the hyperparameters"""
+        X, y = self.get_data(input_df)
+        X_train, X_test, y_train, y_test = train_test_split(X, y)
+        gs = GridSearchCV(self.model, 
+                        param_grid=self.hyperparams,
+                        cv = 10,
+                        verbose = 1, 
+                        n_jobs = -1)
+        # Fitting model CV GS
+        gs.fit(X_train, y_train.ravel())
+        score = gs.score(X_train, y_train.ravel())
+        print(f'Score on train data: {score}')
+        score = gs.score(X_test, y_test.ravel())
+        print(f'Score on test data: {score}')
+        print(gs.best_estimator_)
+        self.model = gs
+        self.save()
     
+
+    def train(self, input_df):
+        """Train on all data"""
+        X, y = self.get_data(input_df)
+
+        n_cols = X.shape[1]
+        print(f'Training {self.name} classifier on {n_cols} features...')
+
+        self.model.fit(X, y.ravel())
+
+        score = self.model.score(X, y)
+        print(f"{self.name} score on all data after training: {round(score, 3)}.")
+
+
+    def save(self):
+        maybe_make_dir('features/models')
+        # Save to file and the config in the current working directory
+        with open(self.config_path, 'wb') as f:
+            pickle.dump(self.hyperparams, f, protocol=pickle.HIGHEST_PROTOCOL)
+        joblib.dump(self.model, self.path)
+
+
+    def load(self):
+        # Load the config/hyperparams
+        with open(self.config_path, 'rb') as f:
+            self.hyperparams = pickle.load(f)
+        # Load the model
+        self.model = joblib.load(self.path)

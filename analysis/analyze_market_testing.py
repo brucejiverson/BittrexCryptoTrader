@@ -1,29 +1,17 @@
 import pandas as pd
 import statistics
 from datetime import datetime
+from tools.tools import f_paths
 
 
 symbols = 'BTCUSD'  # Example: 'BTCUSD'
 market = symbols[3:6] + '-' + symbols[0:3]
 
-paths = {'downloaded history': 'C:/Python Programs/crypto_trader/historical data/bitstampUSD_1-min_data_2012-01-01_to_2019-08-12.csv',
-         'updated history': 'C:/Python Programs/crypto_trader/historical data/updated_history_' + symbols + '.csv',
-         'secret': "/Users/biver/Documents/crypto_data/secrets.json",
-         'rewards': 'agent_rewards',
-         'models': 'agent_models',
-         'test trade log':  'C:/Python Programs/crypto_trader/historical data/trade_testing' + symbols + '.csv'}
+path = f_paths['test trade log']
 
+df = pd.read_pickle(path)
 
-path = paths['test trade log']
-
-def dateparse(x):
-    try:
-        return pd.datetime.strptime(x, "%Y-%m-%d %I-%p-%M")
-    except ValueError:
-        return datetime(year = 2000, month = 1, day = 1)
-
-df = pd.read_csv(path, parse_dates=['Opened', 'Closed'], date_parser=dateparse)
-
+# Convert datetimes to string?? why is this here?
 df['Closed'] = df['Closed'].dt.strftime("%Y-%m-%d %I-%p-%M")
 df['Opened'] = df['Opened'].dt.strftime("%Y-%m-%d %I-%p-%M")
 

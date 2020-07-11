@@ -1,8 +1,7 @@
-from environments import SimulatedCryptoExchange, f_paths
-
+from features.predictor import Predictor
+from tools.tools import f_paths, percent_change_column
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
-import pickle
 import pandas as pd
 import numpy as np
 
@@ -13,98 +12,84 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from sklearn.linear_model import Ridge
 
-#date range to train on
-end = datetime.now() - timedelta(days = 2)
-start = end - timedelta(days = 9)
-sim_env = SimulatedCryptoExchange()
 
-df = sim_env.df.copy()
-y_names = []
-n_predictions = 1       # The number of timesteps in the future that we are trying to predict
+class ridge_regression(Predictor):
+    """Constructs a knn classifier from the df passed. Hyperparameters should be a 
+    dictionary, parameters are k, polynomial degrees. Note that this calculates 
+    percentage change, not simple time differencing, as it makes the threshold more intuitive. 
+    (temporarily changed as it was causing problems)"""
 
-#Calculate what the next price will be
-for i in range(n_predictions):
-    step = (i+1)#*-1
-    y_names.append('Step ' + str(step) + ' % Change')
-    df[y_names[i]] = (df['BTCClose'].shift(-step) - df['BTCClose'])     #/df['BTCClose']
+    def __init__(self, token, hyperparams, n_predictions=1):
+        super().__init__(hyperparams, n_predictions)
+        self.classifier = False
+        self.name = 'ridge'
+        self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
+        self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
+        print(f"Hyperparams: {hyperparams}")
 
-# These do time differencing 
-# df['Last BTCClose'] = df['BTCClose'].shift(1) - df['BTCClose'].shift(2)
-df['BTCClose'] = df['BTCClose'] - df['BTCClose'].shift(1)
-df['BTCVolume'] = df['BTCVolume'] - df['BTCVolume'].shift(1)
-
-df.dropna(inplace = True)
-n_sample, n_feature = df.shape
-
-features_to_use = list(df.columns) # ['BTCClose', 'BTCVolume', 'BTCOBV', 'EMA_30', 'd/dt_EMA_30', 'EMA_78', 'd/dt_EMA_78']
-# Remove the y labels from the 'features to use' 
-for i in range(n_predictions):
-    features_to_use.remove(y_names[i])
-
-X = df[features_to_use].values
-y = df[y_names].values
-
-# Split the data into testing and training dataframes
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2) # , random_state=42)
-
-# Hyperparameters
-hyperparams = {'degrees': [1, 2, 3, 4, 5]}
-
-degree = hyperparams['degrees'][2]
-polynomial_features = PolynomialFeatures(degree=degree)
-# linear_regression = LinearRegression()
-ridge = Ridge(alpha = 1.0, max_iter=10000)
-# The pipeline can be used as any other estimator
-# and avoids leaking the test set into the train set
-pipe = Pipeline([('polynomial_features', polynomial_features), 
-                ('ridge', ridge)])
-
-n_rows, n_cols = X_train.shape
-print(f'Training regression model on {n_cols} features...')
-pipe.fit(X_train, y_train)
-
-score = pipe.score(X_train, y_train)
-print(f"R2 score on train data: {score}.")
-y_train_predict = pipe.predict(X_train)
-score = pipe.score(X_test, y_test)
-print(f"R2 score on test data: {score}.")
-y_test_predict = pipe.predict(X_test)
+        polynomial_features = PolynomialFeatures(degree=1)
+        # linear_regression = LinearRegression()
+        ridge = Ridge(alpha = 1.0, max_iter=10000)
+        # The pipeline can be used as any other estimator
+        # and avoids leaking the test set into the train set
+        self.model = Pipeline([('polynomial_features', polynomial_features), 
+                        ('ridge', ridge)])
 
 
-thresh = .01 #%threshold to check
+    def plot_results(self, df):
+        
+        y_names = []
+        y_predict = df['BTCridge'].values
+        #Calculate what the next price will be
+        for i in range(self.n_predictions):
+            step = (i+1)  # *-1
+            y_names.append('Step ' + str(step) + ' % Change')
+            y = (df['BTCClose'].shift(-step) -
+                    df['BTCClose'])  # /df['BTCClose']
 
-# for i in range(n_predictions):
-#     col = y_names[i]
-#     temp = testing[new_df[col] > thresh]                        #The real values for all predictions greate than 0
-#     n_pred_over_0, n_col = temp.shape
-#     n_success, n_col  = temp[temp[col] > thresh].shape
+        for i in range(self.n_predictions): #Loop over each time step in the future
+            fig = plt.figure()
+            ax1 = fig.add_subplot(111)
+            ax1.set_ylabel('Real Value')
+            ax1.set_xlabel('Predicted Value ' + str(i + 1) + ' timesteps forwards')
+            ax1.set_title('Performance of Linear Regression Model On Test Data')
+            # plt.scatter(y_train[:,i], y_train_predict[:,i])
+            plt.scatter(y_predict, y)
 
-#     print(f'Out of {n_pred_over_0} predictions the price will be over {thresh}, ', end = '')
-#     print(f'{100*round(n_success/n_pred_over_0,2)}% were above that threshhold.')
+        plt.show()
 
-for i in range(n_predictions): #Loop over each time step in the future
-    fig = plt.figure()
-    ax1 = fig.add_subplot(111)
-    ax1.set_ylabel('Real Value')
-    ax1.set_xlabel('Predicted Value ' + str(i + 1) + ' timesteps forwards')
-    ax1.set_title('Performance of Linear Regression Model On Test Data')
-    # plt.scatter(y_train[:,i], y_train_predict[:,i])
-    plt.scatter(y_test[:,i], y_test_predict[:,i])
+if __name__ == "__main__":
+    from environments.environments import SimulatedCryptoExchange
+    #date range to train on
+    end = datetime.now() #- timedelta(days = 1)
+    start = end - timedelta(days = 12)
+    features = {  # 'sign': ['Close', 'Volume'],
+        'EMA': [50, 80, 130],
+        'OBV': [],
+        'high': [],
+        'low': [],
+        'BollingerBands': [],
+        'time of day': [],
+        # 'stack': [0]
+        }
+    sim_env = SimulatedCryptoExchange(granularity=120, feature_dict=features)
 
-plt.show()
+    df = sim_env.df.copy()              # This is the dataframe with all of the features built.
 
-# model = LinearRegression().fit(X_train, y_train) #returns self
-
-# model = make_pipeline(StandardScaler(), PolynomialFeatures(3), Ridge())
-# model.fit(this_X, this_y)
-# mse = mean_squared_error(model.predict(X_test), y_test)
-# y_plot = model.predict(x_plot[:, np.newaxis])
-# plt.plot(x_plot, y_plot, color=colors[name], linestyle=linestyle[name],
-#                 linewidth=lw, label='%s: error = %.3f' % (name, mse))
-#
-# legend_title = 'Error of Mean\nAbsolute Deviation\nto Non-corrupt Data'
-# legend = plt.legend(loc='upper right', frameon=False, title=legend_title,
-                # prop=dict(size='x-small'))
+    print('Testing all classifiers...')
+    token = 'BTC'
+    # Hyperparameters
+    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4, 5),
+                    'ridge__fit_intercept':[False]}
+    ridge_reg = ridge_regression(token, hyperparams)
+    # ridge_reg.load()
+    ridge_reg.optimize_parameters(df)
+    # ridge_reg.train(df)
+    df = ridge_reg.build_feature(df)
+    df, new_name = percent_change_column('BTCClose', df, -1)
+    print(df.head())
+    ridge_reg.save()
+    ridge_reg.plot_results(df)
 
 #print out some info
 # r_sq = model.score(X_train, y_train)
@@ -112,16 +97,6 @@ plt.show()
 
 # r_sq = model.score(X_test, y_test)
 # print('coefficient of determination for testing:', r_sq)
-
-# print('intercept:', model.intercept_)
-# print('slope:', model.coef_)
-
-# print('Saving weights...', end = ' ')
-# #save the weights
-# path = paths['models'] + '/regression.pkl'
-# with open(path, 'wb') as file:
-#     pickle.dump(model, file)
-# print('done')
 
 # X_test = scaler.transform(X_test)
 # y_pred = model.predict(X_test)
