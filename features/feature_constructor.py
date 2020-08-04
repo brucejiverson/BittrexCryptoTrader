@@ -166,7 +166,7 @@ def build_features(candle_df, markets, feature_dict):
 
         # Check for illegal feature names
         acceptable_feature_names = ['sign', 'high', 'low',
-                                    'OBV', 'EMA', 'MACD', 'RSI', 'BollingerBands', 'BBInd',
+                                    'OBV', 'EMA', 'MACD', 'RSI', 'BollingerBands', 'BBInd', 'BBWidth',
                                     'sentiment', 'renko', 'time of day', 
                                     'knn', 'mlp', 'svc', 'ridge', 'stack']
         for f in feature_dict:           # Iterate over the keys
@@ -211,18 +211,23 @@ def build_features(candle_df, markets, feature_dict):
                         temp_df['bb_bbl' + b] = indicator_bb.bollinger_lband()
 
                         # Add Bollinger Band high indicator
-                        temp_df['bb_bbhi' + b] = indicator_bb.bollinger_hband_indicator()
+                        # temp_df['bb_bbhi' + b] = indicator_bb.bollinger_hband_indicator()
 
                         # Add Bollinger Band low indicator
-                        temp_df['bb_bbli' + b] = indicator_bb.bollinger_lband_indicator()
+                        # temp_df['bb_bbli' + b] = indicator_bb.bollinger_lband_indicator()
                         
                         try:
-                            for col in ['bb_bbm' + b, 'bb_bbh' + b, 'bb_bbl' + b, 'bb_bbhi' + b, 'bb_bbli' + b]:
+                            for col in ['bb_bbm' + b, 'bb_bbh' + b, 'bb_bbl' + b,]: # 'bb_bbhi' + b, 'bb_bbli' + b]:
                                 transformed_col = []
-                                for val in temp_df[col].values:
-                                    for i in range(base):
-                                        transformed_col.append(val)
-                                # remove items until lengths match
+                                for i, val in enumerate(temp_df[col].values):
+                                    try:
+                                        next_val = temp_df[col].values[i+1]
+                                    except IndexError:
+                                        next_val = val
+                                    for j in range(base):
+                                        interpolated = j*(next_val - val)/base + val
+                                        transformed_col.append(interpolated)
+                                # remove items until lengths match (usually 0 or 1 items)
                                 while len(transformed_col) > df.shape[0]:
                                     transformed_col.pop(0)
                                 df[col] = transformed_col
@@ -232,17 +237,16 @@ def build_features(candle_df, markets, feature_dict):
                             print(col)
                             print(temp_df.head())
                 elif feature == 'BBInd':
-                    # try:
                     for base in feature_dict['BollingerBands']:
                         b = str(base)
-                        temp_df = df.copy().iloc[::base, :]
                         # The fractional position of the price relative to the high and low bands
                         diff = df['BTCClose'] - df['bb_bbl' + b]
                         df['BBInd'+ b] = diff/(df['bb_bbh' + b] - df['bb_bbl' + b]) - 0.5
-                    # except
-
-                # discrete_derivative('E
-                # MA_' + str(base))
+                elif feature == 'BBWidth':
+                    for base in feature_dict['BollingerBands']:
+                        b = str(base)
+                        df['BBWidth'+ b] = (df['bb_bbh' + b] - df['bb_bbl' + b])
+                # discrete_derivative('EMA_' + str(base))
                 # discrete_derivative('EMA_' + str(int(base*8/3)))
                 # discrete_derivative('EMA_' + str(int(base*13/3)))
                 elif feature == 'sentiment':

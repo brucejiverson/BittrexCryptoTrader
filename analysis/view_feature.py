@@ -5,26 +5,27 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 features_to_view = [
-                    'bb_bbm1', 'bb_bbh1', 'bb_bbl1', 'bb_bbm5', 'bb_bbh5', 'bb_bbl5', # 'bb_bbm10', 'bb_bbh10', 'bb_bbl10', 
+                    # 'bb_bbm1', 'bb_bbh1', 'bb_bbl1', 'bb_bbm5', 'bb_bbh5', 'bb_bbl5', # 'bb_bbm10', 'bb_bbh10', 'bb_bbl10', 
                     # 'bb_bbli', 'bb_bbhi', 
-                    'BBInd1', 'BBInd5' #, 'BBInd10',
+                    'BBInd3', 'BBInd5' #, 'BBInd10',
                     # 'BTCOBV', 'BTCRSI'
                     ] # This is the feature to visualize
-end = datetime(2020, 7, 5)
-start = end - timedelta(days = 50)
+                    
+start = datetime(2020, 6, 17)
+end = datetime(2020, 6, 22)
 
 last_time_scraped = datetime.now() - timedelta(days = .25)
 
 features = {    # 'sign': ['Close', 'Volume'],
     # 'EMA': [50, 80, 130],
-    'BollingerBands': [1, 5],
+    'BollingerBands': [1, 3, 5],
     'BBInd': [],
     'OBV': [],
     'RSI': [],
     'time of day': [],
     # 'stack': [1]
     }
-sim_env = SimulatedCryptoExchange(start, end, granularity=60, feature_dict=features)
+sim_env = SimulatedCryptoExchange(start, end, granularity=5, feature_dict=features)
 
 df = sim_env.df.copy()
 df, new_name = percent_change_column('BTCClose', df, -1)

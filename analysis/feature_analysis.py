@@ -3,6 +3,7 @@ from tools.tools import percent_change_column
 from datetime import datetime, timedelta
 import pandas as pd
 import matplotlib.pyplot as plt
+from mpl_toolkits import mplot3d
 
 end = datetime(2020, 7, 1)
 start = end - timedelta(hours = 18)
@@ -13,8 +14,12 @@ features = {    # 'sign': ['Close', 'Volume'],
     'EMA': [50, 80, 130],
     'OBV': [],
     'RSI': [],
+    'BollingerBands': [1, 5, 10],
+    'BBInd': [],
+    'BBWidth': [],
     'time of day': [],
-    'stack': [1]}
+    # 'stack': [1]
+    }
 sim_env = SimulatedCryptoExchange(start, end, granularity=1, feature_dict=features)
 
 df = sim_env.df.copy()
@@ -28,12 +33,21 @@ df.dropna(inplace = True)
 print(df.tail())
 
 # Plot the y axis
-fig, ax = plt.subplots(1, 1)  # Create the figure
-feat1_name = 'BTCOBV'
-feat2_name = 'BTCRSI'
+ax = plt.axes(projection='3d')  # Create the figure
+feat1_name = 'BBWidth10'
+feat2_name = 'BBInd10'
 thresh = 0.01
-df[df[new_name] > thresh].plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'b')
-df[df[new_name] < thresh].plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'r')
+x = df[feat1_name].values
+y = df[feat2_name].values
+z = df[new_name].values
+ax.scatter3D(x, y ,z, c=z, cmap='Greens')
+# x_up = df[df[new_name] > thresh].loc[feat1_name]
+# x_down = df[df[new_name] < thresh].loc[feat1_name]
+# y_up = df[df[new_name] > thresh].loc[feat2_name]
+# y_down = df[df[new_name] < thresh].loc[feat2_name]
+
+# .plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'b')
+# .plot(x= feat1_name, y=feat2_name, ax=ax, kind = 'scatter', color = 'r')
 
 #Implement a grid search for best features
 n_s, n_f = df[df['BTCClose'] < 0].shape
@@ -45,21 +59,8 @@ avg = df[bool][new_name].mean()#axis = 1)
 print(f'Out of {n_s} samples where the price signal was < {0}, {round(100*n_profit/n_s)}% of next return was above {thresh}%.')
 print(f'Average was {round(avg,3)}%.')
 
-fig, ax = plt.subplots(1, 1)  # Create the figure
+fig, ax = plt.subplots()  # Create the figure
 
 fig.suptitle(' Feature and Future Price Correlation', fontsize=14, fontweight='bold')
 df.plot(x='BTCOBV', y=new_name, ax=ax, kind = 'scatter')
 plt.show()
-
-# assert not sim_env.df.empty
-# for market in sim_env.markets:
-#     token = market[4:7]
-#     # sim_env.df['Combo'] = sim_env.df[token + 'MACD']*sim_env.df[token + 'RSI']
-#
-#     features = [token + 'MACD', token + 'RSI', token + 'OBV']#, 'Combo']
-#
-#     for feature in features:
-#         fig, ax = plt.subplots(1, 1)  # Create the figure
-#
-#         fig.suptitle(feature + ' Feature and Future Price Correlation For' + token, fontsize=14, fontweight='bold')
-#         df.plot(x=feature, y='Future Price', ax=ax, kind = 'scatter')

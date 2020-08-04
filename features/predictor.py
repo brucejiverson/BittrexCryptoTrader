@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import GridSearchCV
 
 class Predictor():
-    def __init__(self, hyperparams, n_predictions):
+    def __init__(self, hyperparams, n_predictions=1):
         self.hyperparams = hyperparams
         self.n_predictions = n_predictions
         self.is_classifier = True
@@ -18,10 +18,9 @@ class Predictor():
         self.model = None
 
 
-    def get_data(self, input_df, label_type):
-        """Builds labels (0, 1) as a column on the dataframe, return np arrays for X and y"""
+    def get_data(self, input_df):
+        """Builds labels (0, 1) or % depending on predictor type as a column on the dataframe, return np arrays for X and y"""
         df = input_df.copy()
-        y_names = []
         token = 'BTC'
 
         df = df[np.isfinite(df).all(1)]     # keep only finite numbers
@@ -36,38 +35,35 @@ class Predictor():
         if self.is_classifier:
             thresh = 0.001
             #Calculate what the next price will be
+            all_labels = np.empty([df.shape[0],self.n_predictions])
+            y_name = (f'Period {str(self.n_predictions)} Mean % Change')
             for i in range(self.n_predictions):
-                step = (i+1)  # *-1
-                y_names.append('Step ' + str(step) + ' % Change')
+                step = (i+1)
                 series = df['BTCClose'].shift(-step)
-                labels = np.empty_like(series.values)
-                for j, item in enumerate(series):
-                    if item > thresh:
-                        labels[j] = 1
-                    else:
-                        labels[j] = 0
-                df[y_names[i]] = labels
-        # Special label
-        # elif label_type == 'line':
-        #     # slope of the line for the next n timesteps
-        #     n = 10
-        #     temp_df = df.copy()
-        #     for i in temp_df.shape[0]:
-        #         temp_df.loc['mean', i] = temp_df.loc['BTCClose', i:i+n]/n
+                
+                all_labels = np.hstack((all_labels, np.atleast_2d(series).T)) 
 
+            # Take the mean accross the prices
+            summed_labels = np.sum(all_labels, axis = 1)
+
+            labels = np.empty_like(summed_labels)
+            for j, item in enumerate(summed_labels):
+                if item > thresh:
+                    labels[j] = 1
+                else:
+                    labels[j] = 0
+            df[y_name] = labels
         else:
             #Calculate what the next price will be
             for i in range(self.n_predictions):
                 step = (i+1)  # *-1
-                df, new_name = percent_change_column('BTCClose', df, -step)
-                y_names.append(new_name)
+                df, y_name = percent_change_column('BTCClose', df, -step)
 
         # print('Training data:')
         # print(df.head(30))
         features_to_use = list(df.columns)
         # Remove the y labels from the 'features to use'
-        for i in range(self.n_predictions):
-            features_to_use.remove(y_names[i])
+        features_to_use.remove(y_name)
             
         # Make sure you aren't building a classifier based on the outputs of other classifiers
         classifier_names = ['knn', 'mlp', 'svc', 'ridge']
@@ -78,7 +74,7 @@ class Predictor():
 
         df = df[np.isfinite(df).all(1)]     # keep only finite numbers
         X = df[features_to_use].values
-        y = df[y_names].values
+        y = df[y_name].values
         return X, y
 
 

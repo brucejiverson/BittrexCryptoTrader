@@ -7,14 +7,15 @@ path = f_paths['live log']
 new_path = path[:-4] + '.pkl'
 print(new_path)
 df = pd.read_pickle(new_path)
+print(df.drop(columns=[0, 1, 2]))
 df.to_pickle(new_path)
 
 df['Total Value'] = round(df['Total Value'], 2) #This round to the nearest cent, which makes plotting nicer
 
 fig, (ax1, ax2) = plt.subplots(2, 1)  # Create the figure
 
-print(df.head())
-df.plot(y = 'Total Value', ax = ax1)
+print(df)
+# df.plot(y = 'Total Value', ax = ax1)
 df.plot(y = 'Total Value', ax = ax1, style = 'bo')
 df.plot(y = '$ of BTC', ax = ax2)
 plt.show()

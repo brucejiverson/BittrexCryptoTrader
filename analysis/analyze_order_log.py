@@ -5,7 +5,7 @@ from tools.tools import f_paths
 from datetime import datetime, timedelta
 
 start = datetime(2020, 4, 18)
-end = datetime(2020, 4, 22)
+end = datetime(2020, 7, 22)
 
 path = f_paths['order log']
 df = pd.read_pickle(path)

@@ -119,7 +119,11 @@ class svc_classifier(Predictor):
 
 
 if __name__ == '__main__':
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--name', type=str, required=True,)
+    args = parser.parse_args()
+    name = args.name
+    assert(name in ['knn', 'svc', 'mlp'])
     from environments.environments import SimulatedCryptoExchange
     #date range to train on
     end = datetime(2020,7,2) #- timedelta(days = 1)
@@ -137,39 +141,39 @@ if __name__ == '__main__':
 
     df = sim_env.df.copy()              # This is the dataframe with all of the features built.
 
-    print('Testing all classifiers...')
     token = 'BTC'
-    # Hyperparameters
-    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4), 
-                    'knn__n_neighbors': (2, 3, 4, 5, 6, 7)}
-    knn = knn_classifier(token, hyperparams)
-    # knn.load()
-    knn.optimize_parameters(df)
-    # knn.train(df)
-    df = knn.build_feature(df)
-    df, new_name = percent_change_column('BTCClose', df, -1)
-    # print(df.head(40))
-    knn.save()
-
-    # hyperparams = {'polynomial_features__degree': (1, 2, 3, 4),
-    #                 'svc__penalty': ['l1', 'l2'],
-    #                 'svc__C': [.5, .75, 1],
-    #                 # 'svc__max_iter': [50000]
-    #                 }    
-    #                 # strength of regularization is inversely proportional to C
-    # svc = svc_classifier(token, hyperparams)
-    # # svc.load()
-    # svc.optimize_parameters(df)
-    # # svc.train(df)
-    # df = svc.build_feature(df)
-    # # print(df.head())
-    # svc.save()
-
-    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4)}
-    mlp = mlp_classifier(token, hyperparams)
-    # mlp.load()
-    mlp.optimize_parameters(df)
-    # mlp.train(df)
-    df = mlp.build_feature(df)
-    # print(df.head())
-    mlp.save()
+    if name == 'knn':
+        # Hyperparameters
+        hyperparams = {'polynomial_features__degree': (1, 2, 3, 4), 
+                        'knn__n_neighbors': (2, 3, 4, 5, 6, 7)}
+        knn = knn_classifier(token, hyperparams)
+        # knn.load()
+        knn.optimize_parameters(df)
+        # knn.train(df)
+        df = knn.build_feature(df)
+        df, new_name = percent_change_column('BTCClose', df, -1)
+        # print(df.head(40))
+        knn.save()
+    elif name == 'svc':
+        hyperparams = {'polynomial_features__degree': (1, 2, 3, 4),
+                        'svc__penalty': ['l1', 'l2'],
+                        'svc__C': [.5, .75, 1],
+                        # 'svc__max_iter': [50000]
+                        }    
+                        # strength of regularization is inversely proportional to C
+        svc = svc_classifier(token, hyperparams)
+        # svc.load()
+        svc.optimize_parameters(df)
+        # svc.train(df)
+        df = svc.build_feature(df)
+        # print(df.head())
+        svc.save()
+    elif name == 'mlp':
+        hyperparams = {'polynomial_features__degree': (1, 2, 3, 4)}
+        mlp = mlp_classifier(token, hyperparams)
+        # mlp.load()
+        mlp.optimize_parameters(df)
+        # mlp.train(df)
+        df = mlp.build_feature(df)
+        # print(df.head())
+        mlp.save()

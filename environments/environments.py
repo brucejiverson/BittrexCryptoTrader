@@ -1,16 +1,17 @@
-from bittrex.bittrex import *
+# from bittrex.bittrex import *
 # from feature-construction.feature_constructors import *
 import mplfinance as mpf
 import plotly.graph_objects as go
 
 from features.feature_constructor import build_features
 from tools.tools import f_paths, maybe_make_dir, printProgressBar, ROI
+from environments.environment_types import ExchangeEnvironment, AccountLog
 import pandas as pd
 import math
 from datetime import datetime, timedelta
-import itertools
+# import itertools
 import numpy as np
-import json
+# import json
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from statsmodels.tsa.stattools import adfuller
@@ -22,480 +23,6 @@ from statsmodels.tsa.stattools import adfuller
 # The below should be updated to be simplified to use parent directory? unsure how that works...
 # https://stackoverflow.com/questions/48745333/using-pandas-how-do-i-save-an-exported-csv-file-to-a-folder-relative-to-the-scr?noredirect=1&lq=1
  
-
-class ExchangeEnvironment(object):
-    """All other environment classes inherit from this class. This is done to ensure similar architecture
-    between different classes (eg simulated vs real exchange), and to make it easy to change that
-    architecture by having change be in a single place."""
-
-    def __init__(self, gran, feature_dict):
-
-        #get my keys
-        with open(f_paths['secret']) as secrets_file:
-            keys = json.load(secrets_file) #loads the keys as a dictionary with 'key' and 'secret'
-            secrets_file.close()
-
-        #Need both versions of the interface as they each provide certain useful functions
-        self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
-        self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
-
-        self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
-        self.n_asset = len(self.markets)
-        self.granularity = gran # minutes
-
-        # Calculate the number of indicators for later state dimension construction
-        self.n_indicators = 0
-        stack = 0
-        if not feature_dict is None:
-            for feature, vals in feature_dict.items():      # iterate over the keys
-                if feature == 'stack':
-                    stack = vals[0]                         # Store this for use with state_dim
-                elif feature == 'BollingerBands':
-                    self.n_indicators += 5
-                elif len(vals) == 0:
-                    self.n_indicators += 1
-                else:
-                    self.n_indicators += len(vals)
-                # printing for debugging
-                # print(f'Feature: {feature}, vals: {vals}, n: {self.n_indicators}')
-
-        portfolio_granularity = 1  # Smallest fraction of portfolio for investment in single asset (.01 to 1)
-        # The possible portions of the portfolio that could be allocated to a single asset
-        possible_vals = [x / 100 for x in list(range(0, 101, int(portfolio_granularity * 100)))]
-
-        # calculate all possible allocations of wealth across the available assets
-        self.action_list = []
-        permutations_list = list(map(list, itertools.product(possible_vals, repeat=self.n_asset)))
-        #Only include values that are possible (can't have more than 100% of the portfolio)
-        for item in permutations_list:
-            if sum(item) <= 1:
-                self.action_list.append(item)
-
-        #This list is for indexing each of the actions
-        self.action_space = np.arange(len(self.action_list))
-
-        #BELOW IS THE OLD WAY THAT INCLUDES THE CURRENT ASSETS HELD
-        # calculate size of state (amount of each asset held, value of each asset, volumes, USD/cash, indicators for each asset)
-        self.state_dim = self.n_asset*2 + self.n_asset*self.n_indicators #price and volume, and then the indicators
-        if stack != 0:
-            self.state_dim *= (stack + 1)
-        self.last_action = [] #The action where nothing is owned
-
-        self.assets_owned = [0]*self.n_asset
-        self.asset_prices = [0]*self.n_asset
-
-        self.USD = None
-        self.candle_df_1min = None
-        self.candle_df = None
-        self.df = None
-        self.transformed_df = None
-        self.asset_data = None
-        self.mean_spread = .00003 #fraction of the price to use as spread when placing limit orders
-        # log_columns = [*[x for x in self.markets], 'Total Value']
-        self.should_log = False
-        log_columns = ['$ of BTC', 'Total Value']
-        self.log = pd.DataFrame(columns=log_columns)
-
-
-    def _parse_candle_dict(self, candle_dictionary, market):
-        # Dataframe formatted the same as in other functions
-        # V and BV refer to volume and base volume
-        ticker = market[4:7]
-        df = pd.DataFrame(candle_dictionary['result'])
-        df['T'] = pd.to_datetime(df['T'], format="%Y-%m-%dT%H:%M:%S")
-        df = df.rename(columns={'T': 'TimeStamp', 'O': ticker + 'Open', 'H': ticker +'High', 'L': ticker +'Low', 'C': ticker +'Close', 'V': ticker +'Volume'})
-        df.set_index('TimeStamp', drop = True, inplace = True)
-        df.drop(columns=["BV"])
-
-        #Reorder the columns
-        df = df[[ticker +'Open', ticker +'High', ticker +'Low', ticker +'Close', ticker +'Volume']]
-        # print(df.head())
-        return df
-
-
-    def _fetch_candle_data(self, start_date, end_date):
-        """This function pulls data from the exchange, the cumulative repository, and the data download in that order
-        depending on the input date range. Typically called in the __init__ method"""
-
-        print('Fetching historical data...')
-
-        """algorithm pseudocode:
-        scrape the latest data
-        try:
-            load to the 1 min binary file
-        except
-            load from csv
-        save to 1 min file
-        if gran  1
-            filter date range
-            return 1 min data
-        try
-            find the full daterange of binary gran file
-            get the 1 min data outside of the binary gran file daterange
-            change the granularity on the 1 min data
-        except FileNotFound
-            convert all of the 1 min data into gran 
-        append to binary gran file
-        save
-        filter date range
-        return
-        """
-
-        def fetch_csv():
-            try:
-                df = pd.DataFrame()
-                # Read the original download file
-                # get the historic data. Columns are TimeStamp	Open	High	Low	Close	Volume_(BTC)	Volume_(Currency)	Weighted_Price
-                def dateparse(x): return pd.Timestamp.fromtimestamp(int(x))
-                cols_to_use = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume_(Currency)']
-                orig_df = pd.read_csv(f_paths['downloaded csv'], 
-                                                usecols=cols_to_use, 
-                                                parse_dates=['Timestamp'], 
-                                                date_parser=dateparse)
-                name_map = {'Open': 'BTCOpen', 'High': 'BTCHigh', 'Low': 'BTCLow',
-                    'Close': 'BTCClose', 'Volume_(Currency)': 'BTCVolume'}
-                orig_df.rename(columns=name_map, inplace=True)
-                orig_df.set_index('Timestamp', inplace=True, drop=True)
-
-                assert not orig_df.empty
-
-                df = df.append(orig_df, sort=True)
-                # apparently this is necessary otherwise the orig_df is in reverse order
-                df.sort_index(inplace=True)
-                return df
-            except FileNotFoundError:
-                print('no csv file found. Please download the csv historical data file from kaggle.')
-                raise(FileNotFoundError)
-
-        df_1_min = pd.DataFrame()
-        scraped_df = pd.DataFrame()
-        # Fetch candle data from bittrex for each market
-        if end_date > datetime.now() - timedelta(days=9):
-            for i, market in enumerate(self.markets):
-                print('Fetching ' + market + ' historical data from the exchange.')
-                attempts = 0
-                while True:
-                    print('Fetching candles from Bittrex... ', end = " ")
-                    candle_dict = self.bittrex_obj_2.get_candles(market, 'oneMin')
-
-                    if candle_dict['success']:
-                        # print(candle_dict)
-                        candle_df = self._parse_candle_dict(candle_dict, market)
-                        print("done.")
-                        # print(candle_df.head())
-                        break
-                    # If there is an error getting the proper data
-                    else:
-                        print("Failed to get candle data. Candle dict: ", end = ' ')
-                        print(candle_dict)
-                        time.sleep(2*attempts)
-                        attempts += 1
-
-                        if attempts == 5:
-                            print('Exceeded maximum number of attempts.')
-                            raise(TypeError)
-                        print('Retrying...')
-                # Handle joining data from multiple currencies
-                if i == 0: scraped_df = scraped_df.append(candle_df, sort = True)
-                else: scraped_df = pd.concat([scraped_df, candle_df], axis = 1)
-                # print('CANDLE DF:')
-                # print(candle_df.tail())
-                # df_1_min = df_1_min.append(candle_df, sort = True) #ok this works
-                # print(df_1_min.tail())
-
-        df_1_min = df_1_min.append(scraped_df, sort=True)
-        df_1_min = self._format_df(df_1_min)
-        # Update the binary file
-        print('Fetching from cum. data repository... ', end='')
-        try:
-            cum_df = pd.read_pickle(f_paths['cum data pickle']+'1.pkl')
-            df_1_min = df_1_min.append(cum_df, sort=True)
-            print('binary file 1 min. gran. loaded... ', end='')
-        except FileNotFoundError:
-            cum_df = fetch_csv()
-            print(cum_df.head())
-            print('jhere')
-            print('csv file 1 min. gran. loaded... ', end='')
-        
-        df_1_min = df_1_min.append(cum_df, sort=True)
-        df_1_min = self._format_df(df_1_min)
-        df_1_min.to_pickle(f_paths['cum data pickle'] + '1.pkl')
-        print(' written to file.')
-        self.candle_df_1min = df_1_min
-        print('1 MINUTE DATA:')
-        print(df_1_min.head())
-        print(df_1_min.tail())
-        
-        assert(df_1_min.index.min() <= start_date)
-
-        # Drop undesired currencies
-        for col in df_1_min.columns:
-            market = 'USD-' + col[0:3]  # should result in 'USD-ETH' or similar
-            # Drop column if necessary
-            if not market in self.markets:
-                df_1_min.drop(columns=[col], inplace=True)
-        
-        df_gran = pd.DataFrame()                         # This is the dataframe that will
-        gran = self.granularity
-        if gran == 1:
-            df_1_min = df_1_min.loc[df_1_min.index >
-                                    start_date + timedelta(hours=7)]
-            df_1_min = df_1_min.loc[df_1_min.index < end_date + timedelta(hours=7)]
-            self.candle_df =  self._format_df(df_1_min)
-            return
-        # Change the granularity of the data
-        gran_path = f_paths['cum data pickle']+str(gran)+'.pkl'
-        try:
-            df_gran = df_gran.append(pd.read_pickle(gran_path), sort=True)
-            df_gran = self._format_df(df_gran)
-            # find the full daterange of binary gran file
-            data_end = df_gran.index[-1]
-
-            # Get the 1 minute data that is outside of the daterange
-            df_to_filter = df_1_min.loc[(df_1_min.index >= data_end - timedelta(minutes=gran+1))]
-
-        # If file not found, convert the 1 minute df_gran into the desired granularity
-        except FileNotFoundError:
-            print('Changing full 1 minute dataset granularity to ' +
-                    str(gran) + ' minutes.')
-            
-            df_to_filter = df_1_min.copy()
-
-        filtered = self._change_granularity(df_to_filter)
-        df_gran = df_gran.append(filtered, sort=True)
-        print('')
-        df_gran = self._format_df(df_gran)
-        df_gran.to_pickle(gran_path)
-        # Filter df_gran
-        df_gran = df_gran.loc[df_gran.index > start_date + timedelta(hours=7)]
-        df_gran = df_gran.loc[df_gran.index < end_date + timedelta(hours=7)]
-
-        self.candle_df = df_gran # Completely resets the candle_df
-        return
-
-
-    def _format_df(self, df):
-        """This function formats the dataframe according to the assets that are in it.
-        Needs to be updated to handle multiple assets. Note that this should only be used before high low open are stripped from the data."""
-        # input_df = input_df[['Date', 'BTCClose']]
-        formatted_df = df.copy()
-        formatted_df = formatted_df.loc[~formatted_df.index.duplicated(keep = 'first')]     # this is intended to remove duplicates. ~ flips bits in the mask
-
-        # cols = formatted_df.columns # Started writing this cause it doesnt work for mulitple currencies
-        # bool_series = df['BTCClose'].notnull()
-        # formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
-
-        formatted_df.sort_index(inplace = True)
-        # formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
-
-        return formatted_df.dropna()
-
-
-    def _change_granularity(self, input_df):
-        """This function looks at the Date columns of the df and modifies the df according to the granularity (in minutes).
-        This function expects self.granularity to be an positive int <= 60*24"""
-        df = input_df.copy()
-        gran = self.granularity
-        if gran == 1:
-            print("Granularity is set to 1 minute.")
-            return df
-
-        new_df = pd.DataFrame(columns = df.columns)
-        start = df.index[0]
-        m = start.minute
-        start += timedelta(minutes=(gran - m + 1))
-        
-        oldest = max(df.index)
-
-        #Loop over the entire dataframe. assumption is that candle df is in 1 min intervals
-        length = df.shape[0]
-        i = 0
-        while True:
-            if i > 100 and i%10 ==0:
-                printProgressBar(i, length, prefix='Progress:', suffix='Complete')
-
-            end = start + timedelta(minutes=gran-1)
-            data = df.loc[(df.index >= start) & (df.index <= end)]
-            
-            try:   
-                # Note that timestamps are the close time
-                candle = pd.DataFrame({'BTCOpen': data.iloc[0]['BTCOpen'],
-                                        'BTCHigh': max(data['BTCHigh']),
-                                        'BTCLow': min(data['BTCLow']),
-                                        'BTCClose': data.iloc[-1]['BTCClose'],
-                                        'BTCVolume': sum(data['BTCVolume'])},
-                                        index=[end])
-                new_df = new_df.append(candle)
-            # Handle empty slices (ignore)
-            except IndexError:
-                pass
-            if end >= oldest: break
-            # print("new_df: ")
-            # print(new_df.head())
-            start += timedelta(minutes=gran)
-            # This is for printing the progress bar
-            try:
-                i = df.index.get_loc(start)
-            except KeyError:
-                pass
-        
-        # print('')
-        # print('Dataframe with updated granularity:')
-        # print(new_df.head())
-        return new_df
-
-
-    def test_data_stationarity(self):
-        """This method performs an ADF test on the transformed df. Code is borrowed from
-        https://www.analyticsvidhya.com/blog/2018/09/non-stationary-time-series-python/
-        Quote: If the test statistic is less than the critical value, we can reject the null
-        hypothesis (aka the series is stationary). When the test statistic is greater
-        than the critical value, we fail to reject the null hypothesis (which means
-        the series is not stationary)."""
-
-        # # These lines make the data stationary for stationarity testing
-        # # log(0) = -inf. Some indicators have 0 values which causes problems w/ log
-        transformed_df = self.df.copy()
-
-        cols = transformed_df.columns
-        for i in range(2*self.n_asset): #loop through prices and volumnes
-            col = cols[i]
-            transformed_df[col] = transformed_df[col] - transformed_df[col].shift(1, fillna=0)
-
-        # transformed_df.drop(transformed_df.index[0], inplace = True)
-
-        #this assumes that the stationary method used on the df is the same used in _get_state()
-        # print("TRANSFORMED DATA: ")
-        # print(transformed_df.head())
-        # print(transformed_df.tail())
-
-        #Perform Dickey-Fuller test:
-        print ('Results of Dickey-Fuller Test:')
-        index=['Test Statistic','p-value','#Lags Used','Number of Observations Used', 'Success']
-        for col in transformed_df.columns:
-            print('Results for ' + col)
-            dftest = adfuller(transformed_df[col], autolag='AIC')
-            success = dftest[0] < dftest[4]['1%']
-            dfoutput = pd.Series([*dftest[0:4], success], index = index)
-            for key,value in dftest[4].items():
-               dfoutput['Critical Value (%s) conf.'%key] = value
-            print (dfoutput)
-            print(' ')
-
-
-        fig, ax = plt.subplots(1, 1)  # Create the figure
-        fig.suptitle('Transformed data', fontsize=14, fontweight='bold')
-
-        for col in transformed_df.columns:
-                transformed_df.plot(y=col, ax=ax)
-
-        fig.autofmt_xdate()
-
-
-    def plot_agent_history(self, name):
-        """This method plots performance of an agent over time.
-        """
-        # print(self.log.head())
-
-        # # def live_plotter(x_vec,y1_data,line1,identifier='',pause_time=0.1):
-        # if self.should_log:
-        #     # this is the call to matplotlib that allows dynamic plotting
-        #     plt.ion()
-        #     fig = plt.figure(figsize=(13,6))
-        #     ax = fig.add_subplot(111)
-        #     # create a variable for the line so we can later update it
-        #     line1, = ax.plot(x_vec,y1_data,'-o',alpha=0.8)
-        #     #update plot label/title
-        #     plt.ylabel('Y Label')
-        #     plt.title('Title: {}'.format(identifier))
-        #     plt.show()
-        #
-        # # after the figure, axis, and line are created, we only need to update the y-data
-        # line1.set_ydata(y1_data)
-        # # adjust limits if new data goes beyond bounds
-        # if np.min(y1_data)<=line1.axes.get_ylim()[0] or np.max(y1_data)>=line1.axes.get_ylim()[1]:
-        #     plt.ylim([np.min(y1_data)-np.std(y1_data),np.max(y1_data)+np.std(y1_data)])
-        # # this pauses the data so the figure/axis can catch up - the amount of pause can be altered above
-        # plt.pause(pause_time)
-        #
-        # # return line so we can update it again in the next iteration
-        # return line1
-
-
-        #Below is old code
-        assert not self.log.empty
-        # fig, ax2 = plt.subplots(1, 1)
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)  # Create the figure
-        # print(self.df.iloc[self.cur_step])
-        for market in self.markets:
-            token = market[4:7]
-
-            market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
-            # fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
-            self.df.plot( y=token +'Close', ax=ax1)
-            
-            self.df.plot(y='bb_bbl10', ax=ax1)
-            self.df.plot(y='bb_bbh10', ax=ax1)
-            fig.autofmt_xdate()
-        fig.suptitle(f'Performance for agent name: {name}', fontsize=14, fontweight='bold')
-        my_roi = ROI(self.log['Total Value'].iloc[0], self.log['Total Value'].iloc[-1])
-        sharpe = my_roi/self.log['Total Value'].std()
-        print(f'Sharpe Ratio: {sharpe}') #one or better is good
-
-        self.log.reset_index().plot(x='index', y='Total Value', ax=ax2)
-        self.log.reset_index().plot(x='index',y='$ of BTC', ax = ax3)            # !!! not formatted to work with multiple coins
-        # self.df.plot(y='BBInd5', ax=ax4)
-        fig.autofmt_xdate()
-
-
-    def plot_market_data(self):
-
-        # I had a ton of trouble getting the plots to look right with the dates.
-        # This link was really helpful http://pandas.pydata.org/pandas-docs/stable/generated/pandas.date_range.html (no longer using this)
-        assert not self.df.empty
-
-        # Find out if there are any features. This way is easier/more truthful than referencing feature list
-        is_features = False
-        for col in self.df.columns:
-            if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                is_features = True
-                break
-
-        #THIS IS OLD
-        # if is_features:
-        #     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)  # Create the figure
-        #     candle_ax = ax1
-        #     # plot the features
-        #     for col in self.df.columns:
-        #         if not col[3:] in ['Open', 'High', 'Low', 'Close', 'Volume']:
-        #             self.df.plot(y=col, ax=ax2)
-
-        # # make a single subplot is there are no features
-        # else:
-        #     fig, candle_ax = plt.subplots(1, 1, sharex=True)  # Create the figure
-
-        for market in self.markets:
-            token = market[4:7]
-
-            # market_perf = ROI(self.df[token + 'Close'].iloc[0], self.df[token + 'Close'].iloc[-1])
-            # fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
-            # SEE THIS https://github.com/matplotlib/mplfinance#usage
-            columns =  {token + 'Open': 'Open', 
-                        token + 'High': 'High', 
-                        token + 'Low': 'Low', 
-                        token + 'Close': 'Close',
-                        token + 'Volume': 'Volume'}            
-            
-            df = self.candle_df.copy()
-            df.index.name = 'Date'
-            df = df.rename(columns, axis=1)
-            try:
-                mpf.plot(df, type='candle', volume=True, show_nontrading=True, 
-                style='yahoo', title='BTC Candle Data', ylabel='OHLC Candles')
-            except KeyError:
-                print('Error plotting (see parent exchange class) :(')
-                print(df.head())
-
 
 class SimulatedCryptoExchange(ExchangeEnvironment):
     """A multi-asset trading environment.
@@ -516,7 +43,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
                 feature_dict=None):
                 
         super().__init__(granularity, feature_dict)
-        print(feature_dict)
+        # print(feature_dict)
         """The data, for asset_data can be thought of as nested arrays, where indexing the
         highest order array gives a snapshot of all data at a particular time, and information at the point
         in time can be captured by indexing that snapshot."""
@@ -537,6 +64,8 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         # instance attributes
         self.initial_investment = initial_investment
+        self.mean_spread = .00003 #fraction of the price to use as spread when placing limit orders
+
         self.cur_step = None
 
         self.reset()
@@ -555,8 +84,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
 
         self.USD = self.initial_investment
 
-        log_columns = ['$ of BTC', 'Total Value']
-        self.log = pd.DataFrame(columns=log_columns)
+        self.log = AccountLog()
 
         return self._get_state(), self._get_val() # Return the state vector (same as obervation for now)
 
@@ -589,9 +117,8 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         btc_amt = self.assets_owned[0]*self.asset_prices[0]
 
         if self.should_log:
-            row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val],'Timestamp':[self.df.iloc[self.cur_step].name]})
-            row.set_index('Timestamp', drop = True, inplace = True)
-            self.log = self.log.append(row, sort = False)
+            new_info = {'$ of BTC':btc_amt, 'Total Value':cur_val, 'Action':action, 'Timestamp':self.df.iloc[self.cur_step].name}
+            self.log.update(new_info)
 
         def log_ROI(initial, final):
             """ Returns the log rate of return, which accounts for how percent changes "stack" over time
@@ -624,32 +151,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         state = np.empty(self.state_dim)
 
         #Instituted a try catch here to help with debugging and potentially as a solution to handling invalid/inf values in log
-        try:
-            # if self.cur_step == 0:
-            #     state = np.zeros(len(self.asset_data[0]))
-
-            # else:   #Make data stationary
-            state = self.asset_data[self.cur_step]
-            # last_slice = self.asset_data[self.cur_step - 1]
-            # #BELOW IS THE OLD WAY OF DOING IT
-            # n = self.n_asset*2 #price and volume
-            # state[0:n] = (cur_slice[0:n] - last_slice[0:n])/last_slice[0:n] #simple differencing for price and volume
-            # for i, item in enumerate(state[0:n]):
-            #     if item is None: state[i] = 0
-            # state[n::] = cur_slice[n::] #these are indicators/other features besides close price and volume
-
-        except ValueError:  #Print shit out to help with debugging then throw error
-            print("Error in simulated market class, _get_state method.")
-            
-            print(f'Cur step:     {self.cur_step}')
-            print(f'n_indicators: {self.n_indicators}')
-            print(f'state_dim:    {self.state_dim}')
-            # construct a dataframe for easier viewing
-            error_df = pd.DataFrame([cur_slice, last_slice, state], index=['cur_slice', 'last_slice', 'state'], columns=self.df.columns)
-            print(error_df)
-            print(f'All columns: {self.df.columns}')
-            raise(ValueError)
-
+        state = self.asset_data[self.cur_step]
         return state
 
 
@@ -724,23 +226,24 @@ class BittrexExchange(ExchangeEnvironment):
     Bittrex, and uses a similar 'act' method to interface with agents."""
 
     def __init__(self, 
-                granularity=1,   # in minutes
+                granularity=1,      # in minutes
                 feature_dict=None,
-                money_to_use=10):
+                money_to_use=10,
+                verbose=1):         # from 0 (no messages) to 3 (lots of messages)
 
         super().__init__(granularity, feature_dict)
         # Note that in this class, there is the candle_df, which has the candle data 
         # At the proper granularity, the 'df', which has the dataframe with all features 
         # also at the the proper gran, and additionally the candle_1min_df
-        
+        self.verbose = verbose
         # instance attributes
         self.initial_investment = money_to_use
-
+        self.feature_dict = feature_dict
         self.asset_volumes = None
 
         # self.state, self.cur_val = self.reset()
-        self.should_log = True
-        self.print_account_health()
+        if self.verbose >= 1:
+            self.print_account_health()
 
 
     def reset(self):
@@ -750,11 +253,10 @@ class BittrexExchange(ExchangeEnvironment):
 
         self._fetch_candle_data(start, end)
         print('CANDLE DATA:')
-        print(self.candle_df.head())
         print(self.candle_df.tail())
-        self._prepare_data()
+        self.df = build_features(self.candle_df, self.markets, self.feature_dict) # This fills in the asset_data array
+        self.asset_data = self.df.values
         print('PREPARED DATA:')
-        print(self.df.head())
         print(self.df.tail())
 
         self.cancel_all_orders()
@@ -774,17 +276,10 @@ class BittrexExchange(ExchangeEnvironment):
         start = datetime.now() - timedelta(hours = 6)
 
         self._fetch_candle_data(start, end)
-        self._prepare_data()
+        self.df = build_features(self.candle_df, self.markets, self.feature_dict) # This fills in the asset_data array
+        self.asset_data = self.df.values
         self.get_all_balances()
-
-        print('Updating log...', end = ' ')
-        btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
-        cur_val = btc_amt + self.USD
-        row = pd.DataFrame({'$ of BTC':[btc_amt], 'Total Value':[cur_val], 'Timestamp': pd.to_datetime(datetime.now()+timedelta(hours=7))})
-        row.set_index('Timestamp', drop = True, inplace = True)
-        self.log = self.log.append(row, sort = False)
-        print('Done')
-
+    
         return self._get_state()
 
 
@@ -815,11 +310,17 @@ class BittrexExchange(ExchangeEnvironment):
         #currently set up for only bitcoin
         # index the action we want to perform
         # action_vec = [(desired amount of stock 1), (desired amount of stock 2), ... (desired amount of stock n)]
-
+            
         # get current value before performing the action
         action_vec = self.action_list[action]
 
         cur_val = self._get_val()
+        if self.verbose >= 3:
+            print(f'Action given to exchange: {action}')        
+            print(f'action_list: {self.action_list}')
+            print(f'Action_vec: {action_vec}')
+            print(f'Current account value: {cur_val}')
+
 
         if action_vec != self.last_action:  # if attmepting to change state
             #Calculate the changes needed for each asset
@@ -842,31 +343,38 @@ class BittrexExchange(ExchangeEnvironment):
                 decimal_diff = a - current_holding                      #want minus have
                 threshhold = 0.05                                       #trades only executed if difference between want and have is sufficiently high enough
 
+                if self.verbose >= 3:
+                    print(f'Current fraction in BTC: {current_holding}.')
+                    print(f'Difference between current fraction and action: {decimal_diff}')
 
                 if -decimal_diff > threshhold:                          #sell if decimal_diff is sufficiently negative
-
-                    print("Aw jeez, I've got " + str(round(-decimal_diff*100,2)) + "% too much of my portfolio in " + str(currency_pair[4:]))
+                    if self.verbose >= 1:
+                        print(f"Aw jeez, I've got {str(round(-decimal_diff*100,2))} % too much of my portfolio in {str(currency_pair[4:])}")
 
                     trade_amount = min(decimal_diff * cur_val, self.assets_owned[i]*self.asset_prices[i]*.99)               #amount to sell of coin in USD, formatted to be neg for _trade logic
-
+                    if self.verbose >= 2:
+                        print(f'Trade amount give to _trade: {trade_amount}')
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount
 
-            for i, a in enumerate(action_vec): #for buying assets
+                elif decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
+                    if self.verbose >= 1:
+                        print(f'Oh boy, time to spend {str(round(decimal_diff*100,2))} % of my portfolio on {str(currency_pair[4:])}')
 
-                current_holding = (self.assets_owned[i]*self.asset_prices[i])/cur_val       #amount of coin currently held as fraction of total portfolio value, between 0 and 1
-                currency_pair = self.markets[i]                         #which currency pair is being evaluated
-                decimal_diff = a - current_holding                      #want minus have
-                threshhold = 0.05                                       #trades only executed if difference between want and have is sufficiently high enough
-
-
-                if decimal_diff > threshhold:                         #buy if decimal_diff is sufficiently positive
-
-                    print("Oh boy, time to spend " + str(round(decimal_diff*100,2)) + "% of my portfolio on " + str(currency_pair[4:]))
-
-                    trade_amount = min(decimal_diff * cur_val, self.assets_owned[i]*self.asset_prices[i]*.99)               #amount to sell of coin in USD, formatted to be neg for _trade logic
-
+                    # trade_amount = min(decimal_diff * cur_val, self.assets_owned[i]*self.asset_prices[i]*.99)               #amount to sell of coin in USD, formatted to be neg for _trade logic
+                    trade_amount = decimal_diff*cur_val
+                    if self.verbose >= 2:
+                        print(f'Trade amount give to _trade: {trade_amount}')
                     self._trade(currency_pair, trade_amount)            #pass command to sell trade @ trade_amount in USD
 
+        btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
+        cur_val = btc_amt + self.USD
+        new_info = {'$ of BTC':btc_amt, 
+                    'Total Value':cur_val,
+                    'Action': action,
+                    'Timestamp':self.df.iloc[-1].name}
+        self.log.update(new_info)
+        if self.verbose >= 2:
+            print('Log has been updated.')
 
     def _get_val(self):
         """ This method returns the current value of the account that the object
@@ -898,7 +406,7 @@ class BittrexExchange(ExchangeEnvironment):
 
                     if attempts_left == 0:
                         print('_get_current_prices has failed. exiting the method...')
-                        break
+                        return None, None
                     else:
                         attempts_left -= 1
                         time.sleep(1)
@@ -907,7 +415,7 @@ class BittrexExchange(ExchangeEnvironment):
                     # print(ticker['result'])
                     print('success.')
                     self.asset_prices[i] = ticker['result']['Last']
-                    break
+                    return ticker['result']['Bid'], ticker['result']['Ask']
 
 
     def get_latest_candle(self, currency_pair):
@@ -1025,35 +533,50 @@ class BittrexExchange(ExchangeEnvironment):
 
         # Note that bittrex exchange is based in GMT 8 hours ahead of CA
 
-        self._get_current_prices()
+        bid, ask = self._get_current_prices()
 
         # Enter a trade into the market.
         #The bittrex.bittrex buy_limit method takes 4 arguments: market, amount, rate
         # Example result  {'success': True, 'message': '', 'result': {'uuid': '2641035d-4fe5-4099-9e7a-cd52067cde8a'}}
-
+        
         if amount > 0:  # buy
-            rate = round(self.asset_prices[0]*(1+self.mean_spread/2), 3)
+            rate = ask
 
             amount_currency = round(amount/rate, 6)
 
             most_possible = round(self.USD/rate * .997, 6)
 
+            if self.verbose >= 3:
+                print(f'Amount of BTC: {amount_currency}. Calculated most possible: {most_possible}')
+                print(f'Price: {rate}')
+
+            if self.verbose >= 1:
+                print(f'Buying ${amount_currency} of pair {currency_pair}')
+
             if amount_currency > most_possible:
                 amount_currency = most_possible
-
+            
+            if self.verbose >= 2:
+                print(f'Trade amount entered to exchange: {amount_currency}')
             coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
             order_entry_status = self.bittrex_obj_1_1.buy_limit(currency_pair, amount_currency, rate)
             side = 'buying'
 
         else:       # Sell
-                 # cur_price is last price, meaning the last that was traded on the exchange
-            rate = round(self.asset_prices[0]*(1-self.mean_spread/2), 3)
+            # cur_price is last price, meaning the last that was traded on the exchange
+            rate = bid      # round(self.asset_prices[0]*(1-self.mean_spread/2), 3)
 
             amount_currency = round(-amount/rate, 6)
             most_possible = round(self.assets_owned[0], 6)
 
+            if self.verbose >= 3:
+                print(f'Amount of BTC: {amount_currency}. Calculated most possible: {most_possible}')
+
             if amount_currency > most_possible:
                 amount_currency = most_possible
+
+            if self.verbose >= 1:
+                print(f'Buying ${amount_currency} of pair {currency_pair}')
 
             coin_index = self.markets.index(currency_pair)          #index of currency pair in market list to correlate to trade amounts
             order_entry_status = self.bittrex_obj_1_1.sell_limit(currency_pair, amount_currency, rate)
@@ -1061,23 +584,25 @@ class BittrexExchange(ExchangeEnvironment):
 
         # Check that an order was entered
         if not order_entry_status['success']:
-            print('Trade attempt for ' + side + ' failed: ', end = ' ')
-            print(order_entry_status['message'])
-            if order_entry_status['message'] == 'INSUFFICIENT_FUNDS':
-                print('Amount: ' + str(amount))
+            if self.verbose >= 1:
+                print('Trade attempt for ' + side + ' failed: ', end = ' ')
+                print(order_entry_status['message'])
+                if order_entry_status['message'] == 'INSUFFICIENT_FUNDS':
+                    print('Amount: ' + str(amount))
             return False
         else: #order has been successfully entered to the exchange
-            print(f'Order for {side} {amount_currency:.8f} {currency_pair[4:]} at a price of ${rate:.2f} has been submitted to the market.')
+            if self.verbose >= 1:
+                print(f'Order for {side} {amount_currency:.8f} {currency_pair[4:]} at a price of ${rate:.2f} has been submitted to the market.')
+            
             uuid = order_entry_status['result']['uuid']
-
             # Loop for a time to see if the order has been filled
             order_is_filled = self._monitor_order_status(uuid) #True if order is filled
 
-
             if order_is_filled == True:
-                print(f'Order has been filled. uuid: {uuid}.')
                 self.get_all_balances()        #updating with new amount of coin
-                self.print_account_health()
+                if self.verbose >=1:
+                    print(f'Order has been filled. uuid: {uuid}.')
+                    self.print_account_health()
 
             #this saves the information regardless of if the trade was successful or not
             self._get_and_save_order_data(uuid)
@@ -1137,7 +662,7 @@ class BittrexExchange(ExchangeEnvironment):
         # in order to construct a df, the values of the dictionary cannot be scalars, must be lists, so convert to lists
         results = {}
         for key in dictionary['result']:
-            results[key] = [dict['result'][key]]
+            results[key] = [dictionary['result'][key]]
         order_df = pd.DataFrame(results)
 
         order_df.drop(columns=['AccountId', 'Reserved', 'ReserveRemaining', 'CommissionReserved', 'CommissionReserveRemaining',
@@ -1157,21 +682,14 @@ class BittrexExchange(ExchangeEnvironment):
         # Load the trade log from csv
         # Note that the dateformat for this is different than for the price history.
         # The format is the same in csv as the bittrex API returns for order data
-        # def dateparse(x):
-        #     try:
-        #         return pd.datetime.strptime(x, date_format)
-        #     except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
-        #         return x
-        # df = pd.read_csv(path, parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
         df = pd.read_pickle(path)
         # df.set_index('Opened', inplace = True, drop = True)
         df = df.append(order_df, sort = False)
 
         # Format and save the df
         df.sort_index(inplace = True)
-        # df.to_csv(path, index = True, index_label = 'Opened', date_format = date_format)
         df.to_pickle(path)
-        print('Order log csv has been updated.')
+        print('Order log binary file has been updated.')
 
 
     def view_order_data(self):
@@ -1182,38 +700,13 @@ class BittrexExchange(ExchangeEnvironment):
                 return pd.datetime.strptime(x, date_format)
             except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
                 return x
-        df = pd.read_csv(f_paths['order log'], parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
-        df.set_index('Opened', inplace = True, drop = True)
+        # df = pd.read_csv(f_paths['order log'], parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
+        # df.set_index('Opened', inplace = True, drop = True)
+        df = pd.read_pickle(f_path['order log'])
         print(' ')
         print('ALL ORDER INFORMATION:')
         print(df)
         print(' ')
-
-
-    def save_log(self):
-        """This method append to the log to the csv."""
-
-        print('Saving logging...', end = ' ')
-        path = f_paths['live log']
-        # date_format = "%Y-%m-%d %I-%p-%M"
-
-        #Load the old log
-        # try:
-        # def dateparse(x): return pd.datetime.strptime(x, date_format)
-
-        try:
-            # df = pd.read_csv(path, parse_dates = ['Timestamp'], date_parser=dateparse)
-            # df.set_index('Timestamp', inplace = True, drop = True)
-            df = pd.read_pickle(path)
-            df = df.append(self.log, sort = True)
-        except pd.errors.EmptyDataError:
-            print('There was no data in the log. Saving data generated during this run... ', end = ' ')
-            maybe_make_dir(path[:-21])
-            df = self.log
-        # except ValueError:
-        # df.to_csv(path, index = True, index_label = 'Timestamp', date_format = date_format)
-        df.to_pickle(path)
-        print('done.')
 
 
     def get_and_save_order_history(self):
@@ -1223,7 +716,8 @@ class BittrexExchange(ExchangeEnvironment):
         and then appends them to the CSV trade log. Trade history is stored locally since the bittrex API only returns trades
         that happened within a recent timeframe. I am not sure what that time frame is."""
 
-        print('Fetching all recent order data...', end = ' ')
+        if self.verbose >= 1:
+            print('Fetching all recent order data...', end = ' ')
         date_format = "%Y-%m-%dT%H:%M:%S"
         path = f_paths['order log']
 
@@ -1233,42 +727,38 @@ class BittrexExchange(ExchangeEnvironment):
         for i, currency_pair in enumerate(self.markets):
             order_history_dict = self.bittrex_obj_1_1.get_order_history(market = currency_pair)
             order_df = pd.DataFrame(order_history_dict['result'])
+            # print(order_df)
             order_df.drop(columns=['IsConditional', 'Condition', 'ConditionTarget',
-                                   'ImmediateOrCancel', 'Closed'], inplace=True)
-            print(order_df.columns)
-            order_df.set_index('TimeStamp', drop = True, inplace = True)
-
+                                   'ImmediateOrCancel'], inplace=True)
+            # print(order_df.columns)
+            
             # dates into datetimes
             order_df.TimeStamp = pd.to_datetime(order_df.TimeStamp, format=date_format)
-            # order_df.Opened = pd.to_datetime(order_df.Opened, format=date_format)
-
+            order_df.Closed = pd.to_datetime(order_df.Closed, format=date_format)
+            order_df.set_index('Closed', drop = True, inplace = True)
+            order_df.rename({'Commission':'CommisionPaid'})
             #Create or append to the df
             if i == 0: df = order_df
             else: df = df.append(order_df, sort = False)
 
-        print('fetched.')
+        if self.verbose >= 1:
+            print('fetched.')
         #This section reads in the order log from csv, and appends any new data
         try:
-            def dateparse(x):
-                try:
-                    return pd.datetime.strptime(x, date_format)
-                except ValueError:  #handles cases for incomplete trades where 'Closed' is NaT
-                    return x
-
             old_df = pd.read_pickle(path)
-            # old_df = pd.read_csv(path, parse_dates = ['Opened', 'Closed'], date_parser=dateparse)
-            # old_df.set_index('Timestamp', inplace = True, drop = True)
-            # print(old_df)
-            old_df = old_df.append(df, sort = False)
-            #
-            old_df.sort_values(by='Opened', inplace=True)
-            #
-            # old_df.to_csv(path, index = True, index_label = 'Opened', date_format = date_format)
-
+            df = df.append(old_df, sort = False)
+            df.sort_values(by='Closed', inplace=True)
+            df.drop_duplicates('OrderUuid',inplace=True)
+            # print(df['Closed'])
+            print(df)
+            filled_orders = df.loc[~df['Closed'].is_null()]
+            print(filled_orders)
         except KeyError:
             print('Order log is empty.')
-        print('Data written to test trade log.')
-        print(old_df)
+        if self.verbose >= 1:
+            print('Data written to test trade log.')
+            # print(df)
+            print(df.columns)
 
 
     def save_candle_data(self):
