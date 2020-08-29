@@ -3,6 +3,7 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 
+from features.label_data import *
 from tools.tools import maybe_make_dir, percent_change_column
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import GridSearchCV
@@ -16,129 +17,7 @@ class Predictor():
         self.path = None
         self.config_path = None
         self.model = None
-
-
-    def get_data(self, input_df, label_type='standard'):
-        if label_type == 'standard':
-            """Builds labels (0, 1) or % depending on predictor type as a column on the dataframe, return np arrays for X and y"""
-            df = input_df.copy()
-            token = 'BTC'
-
-            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-            # print(df.isnull().values.any())
-
-            # These do time differencing for data stationarity
-            price_name = token + 'Close'
-            vol_name = token + 'Volume'
-            df = percent_change_column(price_name, df)
-            df = percent_change_column(vol_name, df)
-            
-            if self.is_classifier:
-                thresh = 0.1
-                #Calculate what the next price will be
-                all_labels = np.empty([df.shape[0],self.n_predictions])
-                y_name = (f'Period {str(self.n_predictions)} Total % Change')
-                for i in range(self.n_predictions):
-                    step = (i+1)
-                    series = df['BTCClose'].shift(-step)
-                    all_labels = np.hstack((all_labels, np.atleast_2d(series).T)) 
-
-                # Take the mean accross the prices
-                summed_labels = np.sum(all_labels, axis = 1)
-
-                labels = np.empty_like(summed_labels)
-                for j, item in enumerate(summed_labels):
-                    if item > thresh:
-                        labels[j] = 1
-                    else:
-                        labels[j] = 0
-                df[y_name] = labels
-            else:
-                #Calculate what the next price will be
-                for i in range(self.n_predictions):
-                    step = (i+1)  # *-1
-                    df, y_name = percent_change_column('BTCClose', df, -step)
-
-            # print('Training data:')
-            # print(df.head(30))
-            features_to_use = list(df.columns)
-            # Remove the y labels from the 'features to use'
-            features_to_use.remove(y_name)
-                
-            # Make sure you aren't building a classifier based on the outputs of other classifiers
-            classifier_names = ['knn', 'mlp', 'svc', 'ridge']
-            for item in features_to_use:
-                for name in classifier_names:
-                    if name in item:
-                        features_to_use.remove(item)
-
-            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-            print('Training data sample:')
-            print(df.head(30))
-            X = df[features_to_use].values
-            y = df[y_name].values
-            return X, y
-
-        elif label_type == 'mean in time period':
-            """Builds labels (0, 1) or % depending on predictor type as a column on the dataframe, return np arrays for X and y"""
-            df = input_df.copy()
-            token = 'BTC'
-
-            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-            # print(df.isnull().values.any())
-
-            # These do time differencing for data stationarity
-            price_name = token + 'Close'
-            vol_name = token + 'Volume'
-            df = percent_change_column(price_name, df)
-            df = percent_change_column(vol_name, df)
-            
-            if self.is_classifier:
-                thresh = 0.15
-                # Calculate what the next price will be. 
-                # Create a matrix where each columns is the price a timestep in the future
-                all_labels = np.empty([df.shape[0],self.n_predictions])
-                y_name = (f'Period {str(self.n_predictions)} Mean % Change')
-                for i in range(self.n_predictions):
-                    step = (i+1)
-                    series = df['BTCClose'].shift(-step)
-                    
-                    all_labels = np.hstack((all_labels, np.atleast_2d(series).T)) 
-
-                # Take the mean accross the prices
-                summed_labels = np.sum(all_labels, axis = 1)
-
-                labels = np.empty_like(summed_labels)
-                for j, item in enumerate(summed_labels):
-                    if item > thresh:
-                        labels[j] = 1
-                    else:
-                        labels[j] = 0
-                df[y_name] = labels
-            else:
-                #Calculate what the next price will be
-                for i in range(self.n_predictions):
-                    step = (i+1)  # *-1
-                    df, y_name = percent_change_column('BTCClose', df, -step)
-
-            # print('Training data:')
-            # print(df.head(30))
-            features_to_use = list(df.columns)
-            # Remove the y labels from the 'features to use'
-            features_to_use.remove(y_name)
-                
-            # Make sure you aren't building a classifier based on the outputs of other classifiers
-            classifier_names = ['knn', 'mlp', 'svc', 'ridge']
-            for item in features_to_use:
-                for name in classifier_names:
-                    if name in item:
-                        features_to_use.remove(item)
-
-            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-            X = df[features_to_use].values
-            y = df[y_name].values
-            return X, y
-
+        
 
     def build_feature(self, input_df):
         df = input_df.copy()
@@ -148,7 +27,6 @@ class Predictor():
             y_predict = self.model.predict(X)
         except ValueError:
             print('Prediction not properly trained. Training on test data set. Recommended retrain.')
-            print("HEY")
             print(self.model.get_params().keys())
             self.optimize_parameters(df)
             y_predict = self.model.predict(X)
@@ -160,7 +38,10 @@ class Predictor():
 
     def optimize_parameters(self, input_df):
         """ Performs a grid search over all of the hyperparameters"""
-        X, y = self.get_data(input_df)
+        df = make_criteria(input_df)
+        X = df.loc[:, df.columns != 'Labels'].values
+        y = df.loc[:, 'Labels'].values
+
         X_train, X_test, y_train, y_test = train_test_split(X, y)
         gs = GridSearchCV(self.model, 
                         param_grid=self.hyperparams,
@@ -180,7 +61,9 @@ class Predictor():
 
     def train(self, input_df):
         """Train on all data"""
-        X, y = self.get_data(input_df)
+        df = make_criteria(input_df)
+        X = df.loc[:, df.columns != 'Labels'].values
+        y = df.loc[:, 'Labels'].values
 
         n_cols = X.shape[1]
         print(f'Training {self.name} classifier on {n_cols} features...')

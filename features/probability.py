@@ -1,5 +1,6 @@
 from tools.tools import percent_change_column
 from datetime import datetime, timedelta
+from features.label_data import *
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,52 +19,10 @@ class statisticsBoy():
     """ This function should do the following:
         get kernels for any new predictions (this is like a feature)
         adding some columns to the dataframe for basic probability"""
-    def __init__(self, target_change = .15, allowable_reversal=-.15):
+    def __init__(self):
         self.kernels = {}
         self.prob_of_buy_signal = None
         self.prob_of_sell_signal = None
-        
-        self.target_change = target_change   # In percentage units
-        self.allowable_reversal = allowable_reversal
-        
-
-    def make_criteria(self, input_df, target_time_range=13):
-        # This is currently symmetric (prediction mirrored conditions for buy/sell signals)
-        df = input_df.copy()
-
-        #Loop to create percentage columns
-        generated_names = []
-        for i in range(target_time_range):
-            df, label_name = percent_change_column('BTCClose', df, -(i+1))
-            generated_names.append(label_name)
-
-        df.dropna(inplace=True)
-
-        # THIS IS WHERE THE CONDITIONS FOR BUYING ARE DEFINED
-        # Calculate some basic parameters around take profit and downdraw (I may be using that word wrong?)
-        df['Max increase'] = df[generated_names].max(axis=1)
-        df['Max decrease'] = df[generated_names].min(axis=1)
-        df['Labels'] = np.zeros(df.shape[0])      # Initialize as all samples as "not suitable for buying"
-        df.loc[(df['Max increase'] > self.target_change) & (df['Max decrease'] > self.allowable_reversal), 'Labels'] = 1        # Predicted its going up
-        df.loc[(df['Max increase'] < -self.allowable_reversal) & (df['Max decrease'] < -self.target_change), 'Labels'] = -1     # Predicted its going down
-        
-        # Drop the temporary columns
-        df.drop(columns=['Max increase', 'Max decrease', *generated_names], inplace=True)
-        return df
-
-    def plot_make_criteria(self, input_df):
-        df = input_df.copy()
-        fig, ax = plt.subplots(1, 1)
-
-        input_df.plot(y='BTCClose', ax=ax)
-        print(df.head())
-        print(df.reset_index().head())
-        buys = input_df[input_df['Labels'] == 1]
-        sells = input_df[input_df['Labels'] == -1]
-        buys.reset_index().plot(y = 'BTCClose', x='index', ax=ax, kind='scatter', marker='^', c='g', zorder=4)
-        sells.reset_index().plot(y = 'BTCClose', x='index', ax=ax, kind='scatter', marker='v', c='r', zorder=4)
-        fig.autofmt_xdate()
-        fig.suptitle(f'Make criteria', fontsize=14, fontweight='bold')
 
 
     def do_analysis(self, df, names):
@@ -89,7 +48,7 @@ class statisticsBoy():
     def build_feature(self, input_df, names):
         # For now, not doing train/test split, but this function should do that, use cross validation, and then rebuild all. I think
         df = input_df.copy()
-
+        
         # Calculate the probabilities for each sample (evaluation of training data)
         
         # Get the kernels that should have been made earlier
@@ -204,35 +163,6 @@ class statisticsBoy():
             rough_losses = df.loc[(df['Likelihood of buy given x'] >= t) & (df['Labels'] == 0), '% Change 5 steps in future'].sum()
             print(f'Estimated performance for threshold {t} is {rough_profit + rough_losses}')
 
-
-    def analyze_make_criteria(self, df):
-        # splits data at 80% train 80% test by default
-        all_cols = list(df)
-        earliest = df.index.min()
-        most_recent = df.index.max()
-
-        # calculate 80 percent
-        timerange = most_recent - earliest 
-        split_line = earliest + timerange/0.8
-        print(split_line)
-        X = df[all_cols.remove('Labels')].values
-        Y = df['Labels'].values
-
-
-        data_positions = df[[name1, name2]].values.T                    # Get the data. 
-
-        # fit the model to the training data
-        should_buy_vals = df[df['Labels'] == 1][[name1, name2]].values.T    # Get a numpy array and transpose it so data is in rows
-        x_given_buy_kernel = stats.gaussian_kde(should_buy_vals)
-        x_kernel = stats.gaussian_kde(data_positions)                       # create and fit the kernel obj
-
-
-        # evalute the model on the test data
-        # Use bayes theorem to calculate the liklihood
-        buy_given_x = np.multiply(x_given_buy, self.prob_of_buy_signal)                                      # multiply by odds of getting buy sig
-        buy_given_x = np.divide(buy_given_x, x_pde, out=np.zeros_like(buy_given_x), where=x_pde!=0)     # divide by probability of getting a sample at X
-        # score the performance on the test data
-        
 
     def plot_likelihood(self, df, names_to_use):
         """This function plots a surface using columns of a dataframe and labels them nicely. Note that it does not call plt.show()
@@ -353,9 +283,9 @@ if __name__ == "__main__":
     names = [feat1_name, feat2_name]
     
     my_stats = statisticsBoy()
-    df = my_stats.make_criteria(df)
-    # my_stats.plot_make_criteria(df)
-    # my_stats.analyze_make_criteria(df)
+    df = make_criteria(df)
+    # plot_make_criteria(df)
+    # analyze_make_criteria(df)
     my_stats.do_analysis(df, names)
     df = my_stats.build_feature(df, names)
     # df = my_stats.analyze_probability_threshold(df)

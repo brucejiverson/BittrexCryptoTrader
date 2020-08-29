@@ -175,19 +175,19 @@ if __name__ == '__main__':
     from environments.environments import SimulatedCryptoExchange
     #date range to train on
     start = datetime(2020, 1, 1)
-    end = datetime(2020, 1, 15) #- timedelta(days = 1)
+    end = datetime.now() #- timedelta(days = 1)
     features = {  # 'sign': ['Close', 'Volume'],
         # 'EMA': [],
         'OBV': [],
         'RSI': [],
         # 'high': [],
         # 'low': [],
-        'BollingerBands': [3, 5],
+        'BollingerBands': [3, 4, 5],
         'BBInd': [],
         'BBWidth': [],
-        'discrete_derivative': ['BBWidth3'],
+        'discrete_derivative': ['BBWidth3', 'BBWidth4', 'BBWidth5'],
         # 'time of day': [],
-        'stack': [4]
+        'stack': [2]
         }
     sim_env = SimulatedCryptoExchange(granularity=5, feature_dict=features)
 
