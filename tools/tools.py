@@ -70,11 +70,15 @@ def percent_change_column(col_name, input_df, shift_val=1):
     if shift_val > 0:
         df[col_name] = (df[col_name] - df[col_name].shift(shift_val, fill_value=0))/df[col_name].shift(shift_val, fill_value=0)
         df[col_name] = 100*df[col_name].fillna(0)
+        df.replace([np.inf, -np.inf], np.nan)
+        df.dropna(inplace=True)
         return df
     elif shift_val < 0:
-        name = 'Future ' + str(shift_val) + ' % Change'
-        df[name] = (df[col_name] - df[col_name].shift(shift_val, fill_value=0))/df[col_name].shift(shift_val, fill_value=0)
+        name = '% Change ' + str(-shift_val) + ' steps in future'
+        df[name] = (df[col_name].shift(shift_val, fill_value=None) - df[col_name])/df[col_name]
         df[name] = 100*df[name]
+        df.replace([np.inf, -np.inf], np.nan)
+        df.dropna(inplace=True)
         return df, name
     else:
         raise(ValueError)

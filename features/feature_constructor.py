@@ -2,8 +2,10 @@ import numpy as np
 import pandas as pd
 import ta
 from features.classifiers import knn_classifier, mlp_classifier, svc_classifier
+from features.probability import statisticsBoy
 from datetime import datetime
 import requests
+from tools.tools import percent_change_column
 
 def add_EMA_as_column(token, p, df):
     # p is a number
@@ -110,14 +112,6 @@ def add_sentiment(mydata):
             mydata['Sentiment'] = sentiment
 
 
-def discrete_derivative(col_name, input_df):
-    df = input_df.copy()
-    # df['d/dt_' + col_name] = (df[col_name].shift(-1, fill_value = 0) - df[col_name].shift(1, fill_value = 0))/(2*granularity) #this is a centered derivative
-    # df['d/dt_' + col_name].iloc[-1] = df[col_name][-2] - df[col_name][-1])/granularity  #Fill in the last value
-    df['d/dt_' + col_name] = (df[col_name] - df[col_name].shift(1))/granularity  #I used a non centered derivative because in real time this is the best we can do
-    return df
-
-
 def sign_mapping(input_df):
     df = input_df.copy()
     # Loop to feature map
@@ -137,22 +131,38 @@ def time_of_day(input_df):
     return df
 
 
-def stack(n, df):
-    # This function stacks the states so that both the current state and previous n states are passed.
-    new_df = df.copy()
-    for i in range(1, n+1):
-        shifted_df = df.shift(i)
-        # remove open high low from shift
-        for col in shifted_df.columns:
-            if col[3:] in ['Open', 'High', 'Low']:
-                shifted_df.drop(col, axis=1, inplace=True)
-        new_cols = [c + "_shift_" + str(i) for c in shifted_df.columns]
-        shifted_df.columns = new_cols
-        new_df = pd.concat([new_df, shifted_df], axis=1, sort=True)
-    return new_df
+def stack(n, df, mode='Close'):
+
+    if mode == 'Close':
+        # This function stacks the states so that both the current state and previous n states are passed.
+        new_df = df.copy()
+        for i in range(1, n+1):
+            shifted_df = df.shift(i)
+            # remove open high low from shift
+            for col in shifted_df.columns:
+                if not col == 'BTCClose':
+                    shifted_df.drop(col, axis=1, inplace=True)
+            new_cols = [c + "_shift_" + str(i) for c in shifted_df.columns]
+            shifted_df.columns = new_cols
+            new_df = pd.concat([new_df, shifted_df], axis=1, sort=True)
+        return new_df
+        
+    else:
+        # This function stacks the states so that both the current state and previous n states are passed.
+        new_df = df.copy()
+        for i in range(1, n+1):
+            shifted_df = df.shift(i)
+            # remove open high low from shift
+            for col in shifted_df.columns:
+                if col[3:] in ['Open', 'High', 'Low']:
+                    shifted_df.drop(col, axis=1, inplace=True)
+            new_cols = [c + "_shift_" + str(i) for c in shifted_df.columns]
+            shifted_df.columns = new_cols
+            new_df = pd.concat([new_df, shifted_df], axis=1, sort=True)
+        return new_df
 
 
-def build_features(candle_df, markets, feature_dict):
+def build_features(testing_df, markets, feature_dict, training_df=None):
         """This method takes the raw candle data and constructs features based on the provided list of strings"""
         
         print('Constructing features... ', end = ' ')
@@ -160,15 +170,17 @@ def build_features(candle_df, markets, feature_dict):
         if feature_dict is None:
             print('no features built.')
             return candle_df
-        df = candle_df.copy()       # At this higher level, it is safer to construct a new dataframe instead of modifying the one that gets passed.
+        test_df = testing_df.copy()       # At this higher level, it is safer to construct a new dataframe instead of modifying the one that gets passed.
+        train_df = training_df.copy()
         #This section constructs engineered features and adds them as columns to the df
         """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
 
         # Check for illegal feature names
         acceptable_feature_names = ['sign', 'high', 'low',
                                     'OBV', 'EMA', 'MACD', 'RSI', 'BollingerBands', 'BBInd', 'BBWidth',
-                                    'sentiment', 'renko', 'time of day', 
-                                    'knn', 'mlp', 'svc', 'ridge', 'stack']
+                                    'sentiment', 'renko', 'time of day', 'discrete_derivative',
+                                    'knn', 'mlp', 'svc', 'ridge', 'stack',
+                                    'probability']
         for f in feature_dict:           # Iterate over the keys
             if not f in acceptable_feature_names:
                 print('An unrecognized feature has been passed to the feature contructor (not in the acceptable feature list).')
@@ -176,117 +188,147 @@ def build_features(candle_df, markets, feature_dict):
                 raise(ValueError)
         print(feature_dict)
         #Add the features to the df. It would be great to have a dict of features and functions but im not sure how to do that
-        for market in markets:
-            token = market[4:7] #this is something like 'BTC' or 'ETH'
-            for feature in feature_dict:               # Iterate over the keys
-                if feature == 'high':
-                    df[token+'HighInd'] = df[token+'High'] - df[token+'Open']
-                elif feature == 'low':
-                    df[token+'LowInd'] = df[token+'Low'] - df[token+'Open']
-                elif feature == 'sign':
-                    df = sign_mapping(df)
-                elif feature == 'OBV':
-                    df[token + 'OBV'] = ta.volume.on_balance_volume(df[token + 'Close'], df[token + 'Volume'], fillna  = True)
-                    df[token + 'OBV'] = df[token + 'OBV'] - df[token + 'OBV'].shift(1, fill_value=0)
-                elif feature == 'MACD':
-                    df[token + 'MACD'] = ta.trend.macd_diff(df[token + 'Close'], fillna  = True)
-                elif feature == 'RSI':
-                    df[token + 'RSI'] = ta.momentum.rsi(df[token + 'Close'], fillna  = True)
-                elif feature == 'EMA':
-                    for base in feature_dict[feature]:
-                        add_EMA_as_column(token, base, df)
-                    # add_EMA_as_column(token, int(base*8/3))
-                    # add_EMA_as_column(token, int(base*13/3))
-                elif feature == 'BollingerBands':
-                    for base in feature_dict[feature]:
-                        temp_df = df.copy().iloc[::base, :]
+        for df in [test_df, train_df]:
+            for market in markets:
+                token = market[4:7] #this is something like 'BTC' or 'ETH'
+                for feature in feature_dict:               # Iterate over the keys
+                    if feature == 'high':
+                        df[token+'HighInd'] = df[token+'High'] - df[token+'Open']
+                    elif feature == 'low':
+                        df[token+'LowInd'] = df[token+'Low'] - df[token+'Open']
+                    elif feature == 'sign':
+                        df = sign_mapping(df)
+                    elif feature == 'OBV':
+                        df[token + 'OBV'] = ta.volume.on_balance_volume(df[token + 'Close'], df[token + 'Volume'], fillna  = True)
+                        df[token + 'OBV'] = df[token + 'OBV'] - df[token + 'OBV'].shift(1, fill_value=0)
+                    elif feature == 'MACD':
+                        df[token + 'MACD'] = ta.trend.macd_diff(df[token + 'Close'], fillna  = True)
+                    elif feature == 'RSI':
+                        df[token + 'RSI'] = ta.momentum.rsi(df[token + 'Close'], fillna  = True)
+                    elif feature == 'EMA':
+                        for base in feature_dict[feature]:
+                            add_EMA_as_column(token, base, df)
+                        # add_EMA_as_column(token, int(base*8/3))
+                        # add_EMA_as_column(token, int(base*13/3))
+                    elif feature == 'BollingerBands':
+                        bb_drop = True
+                        for base in feature_dict[feature]:
+                            if feature == 'do not drop':
+                                bb_drop = False
+                                continue
+                            temp_df = df.copy().iloc[::base, :]
+                            
+                            # Initialize Bollinger Bands Indicator
+                            indicator_bb = ta.volatility.BollingerBands(close=temp_df[token+"Close"], n=20, ndev=2)
+
+                            # Add Bollinger Bands features
+                            b = str(base)
+                            temp_df['bb_bbm' + b] = indicator_bb.bollinger_mavg()
+                            temp_df['bb_bbh' + b] = indicator_bb.bollinger_hband()
+                            temp_df['bb_bbl' + b] = indicator_bb.bollinger_lband()
+
+                            # Interpolate the more sparse temp_df into the full df
+                            try:
+                                for col in ['bb_bbm' + b, 'bb_bbh' + b, 'bb_bbl' + b,]:
+                                    transformed_col = []
+                                    for i, val in enumerate(temp_df[col].values):
+                                        try:
+                                            next_val = temp_df[col].values[i+1]
+                                        except IndexError:
+                                            next_val = val
+                                        for j in range(base):
+                                            interpolated = j*(next_val - val)/base + val
+                                            transformed_col.append(interpolated)
+                                    # remove items until lengths match (usually 0 or 1 items)
+                                    while len(transformed_col) > df.shape[0]:
+                                        transformed_col.pop(0)
+                                    df[col] = transformed_col
+                            except ValueError:
+                                print(len(transformed_col))
+                                print(df.shape)
+                                print(col)
+                                print(temp_df.head())
+                    elif feature == 'BBInd':
+                        for base in feature_dict['BollingerBands']:
+                            b = str(base)
+                            # The fractional position of the price relative to the high and low bands
+                            diff = df['BTCClose'] - df['bb_bbl' + b]
+                            df['BBInd'+ b] = diff/(df['bb_bbh' + b] - df['bb_bbl' + b]) - 0.5
+                    elif feature == 'BBWidth':
+                        for base in feature_dict['BollingerBands']:
+                            b = str(base)
+                            df['BBWidth'+ b] = (df['bb_bbh' + b] - df['bb_bbl' + b])
+                    # discrete_derivative('EMA_' + str(base))
+                    # discrete_derivative('EMA_' + str(int(base*8/3)))
+                    # discrete_derivative('EMA_' + str(int(base*13/3)))
+                    elif feature == 'discrete_derivative':
+                        for col_name in feature_dict['discrete_derivative']:
+                            temp = percent_change_column(col_name, df)
+                            df['ddt_' + str(col_name)] = temp[col_name]
+                    elif feature == 'sentiment':
+                        add_sentiment(df)
+                    elif feature == 'renko':
+                        block = 50
+                        add_renko(block, token)
+                    elif feature == 'time of day':
+                        df = time_of_day(df)
+                    elif feature == 'stack':
+                        n = feature_dict[feature][0]
+                        df = stack(n, df)
+                    elif feature == 'knn':
+                        hyperparams = {'polynomial_features__degree': (1, 2, 3, 4), 
+                        'knn__n_neighbors': (2, 3, 4, 5, 6, 7, 8, 9)}
+                        knn = knn_classifier(token, hyperparams, n_predictions=5)
+                        knn.load()
+                        # knn.optimize_parameters(df)
+                        # knn.train(df)
+                        df = knn.build_feature(df)
+                    elif feature == 'mlp':
+                        hyperparams = {'polynomial_features__degree': (1, 2, 3, 4, 5)}
+                        mlp = mlp_classifier(token, hyperparams)
+                        mlp.load()
+                        # mlp.optimize_parameters(df)
+                        # mlp.train(df)
+                        df = mlp.build_feature(df)
+                    elif feature == 'svc':
+                        hyperparams = {'polynomial_features__degree': (1, 2, 3, 4, 5),
+                                        'svc__penalty': ['l1', 'l2'],
+                                        'svc__C': [.25, .5, .75, 1],
+                                        'svc__max_iter': [50000]}    
+                        svc = svc_classifier(token, hyperparams)
+                        svc.load()
+                        # svc.optimize_parameters(df)
+                        # svc.train(df)
+                        df = svc.build_feature(df)
+                    elif feature == 'probability':
+                        pass
                         
-                        # Initialize Bollinger Bands Indicator
-                        indicator_bb = ta.volatility.BollingerBands(close=temp_df[token+"Close"], n=20, ndev=2)
+                    else:
+                        print(f'Feature: {feature} not found.')
 
-                        # Add Bollinger Bands features
-                        b = str(base)
-                        temp_df['bb_bbm' + b] = indicator_bb.bollinger_mavg()
-                        temp_df['bb_bbh' + b] = indicator_bb.bollinger_hband()
-                        temp_df['bb_bbl' + b] = indicator_bb.bollinger_lband()
-
-                        # Add Bollinger Band high indicator
-                        # temp_df['bb_bbhi' + b] = indicator_bb.bollinger_hband_indicator()
-
-                        # Add Bollinger Band low indicator
-                        # temp_df['bb_bbli' + b] = indicator_bb.bollinger_lband_indicator()
-                        
+                if bb_drop == True:
+                    for feature in feature_dict['BollingerBands']:
+                        names = [n + str(feature) for n in ['bb_bbl', 'bb_bbm', 'bb_bbh']]
                         try:
-                            for col in ['bb_bbm' + b, 'bb_bbh' + b, 'bb_bbl' + b,]: # 'bb_bbhi' + b, 'bb_bbli' + b]:
-                                transformed_col = []
-                                for i, val in enumerate(temp_df[col].values):
-                                    try:
-                                        next_val = temp_df[col].values[i+1]
-                                    except IndexError:
-                                        next_val = val
-                                    for j in range(base):
-                                        interpolated = j*(next_val - val)/base + val
-                                        transformed_col.append(interpolated)
-                                # remove items until lengths match (usually 0 or 1 items)
-                                while len(transformed_col) > df.shape[0]:
-                                    transformed_col.pop(0)
-                                df[col] = transformed_col
-                        except ValueError:
-                            print(len(transformed_col))
-                            print(df.shape)
-                            print(col)
-                            print(temp_df.head())
-                elif feature == 'BBInd':
-                    for base in feature_dict['BollingerBands']:
-                        b = str(base)
-                        # The fractional position of the price relative to the high and low bands
-                        diff = df['BTCClose'] - df['bb_bbl' + b]
-                        df['BBInd'+ b] = diff/(df['bb_bbh' + b] - df['bb_bbl' + b]) - 0.5
-                elif feature == 'BBWidth':
-                    for base in feature_dict['BollingerBands']:
-                        b = str(base)
-                        df['BBWidth'+ b] = (df['bb_bbh' + b] - df['bb_bbl' + b])
-                # discrete_derivative('EMA_' + str(base))
-                # discrete_derivative('EMA_' + str(int(base*8/3)))
-                # discrete_derivative('EMA_' + str(int(base*13/3)))
-                elif feature == 'sentiment':
-                    add_sentiment(df)
-                elif feature == 'renko':
-                    block = 50
-                    add_renko(block, token)
-                elif feature == 'time of day':
-                    df = time_of_day(df)
-                elif feature == 'stack':
-                    n = feature_dict[feature][0]
-                    df = stack(n, df)
-                elif feature == 'knn':
-                    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4), 
-                    'knn__n_neighbors': (2, 3, 4, 5, 6, 7, 8, 9)}
-                    knn = knn_classifier(token, hyperparams)
-                    # knn.load()
-                    knn.optimize_parameters(df)
-                    # knn.train(df)
-                    df = knn.build_feature(df)
-                elif feature == 'mlp':
-                    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4, 5)}
-                    mlp = mlp_classifier(token, hyperparams)
-                    mlp.load()
-                    # mlp.optimize_parameters(df)
-                    # mlp.train(df)
-                    df = mlp.build_feature(df)
-                elif feature == 'svc':
-                    hyperparams = {'polynomial_features__degree': (1, 2, 3, 4, 5),
-                                    'svc__penalty': ['l1', 'l2'],
-                                    'svc__C': [.25, .5, .75, 1],
-                                    'svc__max_iter': [50000]}    
-                    svc = svc_classifier(token, hyperparams)
-                    svc.load()
-                    # svc.optimize_parameters(df)
-                    # svc.train(df)
-                    df = svc.build_feature(df)
+                            df.drop(columns=names, inplace=True)
+                        except KeyError:
+                            print(f'Error dropping column {names}')
+                            print(df.columns)
+                            # print(df.loc[names].iloc[0])
+            
+        # separated out for easy looping over both dicts with the other functions. Useful for lazy learners
+        if 'probability' in feature_dict.keys():
+            assert(not train_df is None)        # Need training data to do this properly
+            # Feature names are passed to the constructor
+            feat1_name, feat2_name = feature_dict['probability']
+            my_stats = statisticsBoy(target_change=0.1, allowable_reversal=-.5)
+            temp_df = my_stats.make_criteria(train_df, target_time_range=13)
+            my_stats.do_analysis(temp_df, [feat1_name, feat2_name])
+            test_df = my_stats.build_feature(test_df, [feat1_name, feat2_name])
+
         print('done.')
 
-        df_cols = df.columns
+        df_cols = test_df.columns
 
         # Strip out open high low close
         for market in markets:
@@ -295,4 +337,4 @@ def build_features(candle_df, markets, feature_dict):
                 if col in [token + 'Open', token + 'High', token + 'Low']:
                     df.drop(columns=[col], inplace = True)
 
-        return df
+        return test_df

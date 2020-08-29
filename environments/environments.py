@@ -54,7 +54,7 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         print(self.candle_df.tail())
         #Convention here is string key, list of hyperparams typically for multiple of the feature type
                        # This is how many of the previous states to include
-        self.df = build_features(self.candle_df, self.markets, feature_dict) # This fills in the asset_data array
+        self.df = build_features(self.candle_df, self.markets, feature_dict, self.train_df) # This fills in the asset_data array
         self.asset_data = self.df.values
         print('PREPARED DATA:')
         print(self.df.head())

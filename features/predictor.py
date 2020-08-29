@@ -18,64 +18,126 @@ class Predictor():
         self.model = None
 
 
-    def get_data(self, input_df):
-        """Builds labels (0, 1) or % depending on predictor type as a column on the dataframe, return np arrays for X and y"""
-        df = input_df.copy()
-        token = 'BTC'
+    def get_data(self, input_df, label_type='standard'):
+        if label_type == 'standard':
+            """Builds labels (0, 1) or % depending on predictor type as a column on the dataframe, return np arrays for X and y"""
+            df = input_df.copy()
+            token = 'BTC'
 
-        df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-        # print(df.isnull().values.any())
+            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
+            # print(df.isnull().values.any())
 
-        # These do time differencing for data stationarity
-        price_name = token + 'Close'
-        vol_name = token + 'Volume'
-        df = percent_change_column(price_name, df)
-        df = percent_change_column(vol_name, df)
-        
-        if self.is_classifier:
-            thresh = 0.001
-            #Calculate what the next price will be
-            all_labels = np.empty([df.shape[0],self.n_predictions])
-            y_name = (f'Period {str(self.n_predictions)} Mean % Change')
-            for i in range(self.n_predictions):
-                step = (i+1)
-                series = df['BTCClose'].shift(-step)
-                
-                all_labels = np.hstack((all_labels, np.atleast_2d(series).T)) 
-
-            # Take the mean accross the prices
-            summed_labels = np.sum(all_labels, axis = 1)
-
-            labels = np.empty_like(summed_labels)
-            for j, item in enumerate(summed_labels):
-                if item > thresh:
-                    labels[j] = 1
-                else:
-                    labels[j] = 0
-            df[y_name] = labels
-        else:
-            #Calculate what the next price will be
-            for i in range(self.n_predictions):
-                step = (i+1)  # *-1
-                df, y_name = percent_change_column('BTCClose', df, -step)
-
-        # print('Training data:')
-        # print(df.head(30))
-        features_to_use = list(df.columns)
-        # Remove the y labels from the 'features to use'
-        features_to_use.remove(y_name)
+            # These do time differencing for data stationarity
+            price_name = token + 'Close'
+            vol_name = token + 'Volume'
+            df = percent_change_column(price_name, df)
+            df = percent_change_column(vol_name, df)
             
-        # Make sure you aren't building a classifier based on the outputs of other classifiers
-        classifier_names = ['knn', 'mlp', 'svc', 'ridge']
-        for item in features_to_use:
-            for name in classifier_names:
-                if name in item:
-                    features_to_use.remove(item)
+            if self.is_classifier:
+                thresh = 0.1
+                #Calculate what the next price will be
+                all_labels = np.empty([df.shape[0],self.n_predictions])
+                y_name = (f'Period {str(self.n_predictions)} Total % Change')
+                for i in range(self.n_predictions):
+                    step = (i+1)
+                    series = df['BTCClose'].shift(-step)
+                    all_labels = np.hstack((all_labels, np.atleast_2d(series).T)) 
 
-        df = df[np.isfinite(df).all(1)]     # keep only finite numbers
-        X = df[features_to_use].values
-        y = df[y_name].values
-        return X, y
+                # Take the mean accross the prices
+                summed_labels = np.sum(all_labels, axis = 1)
+
+                labels = np.empty_like(summed_labels)
+                for j, item in enumerate(summed_labels):
+                    if item > thresh:
+                        labels[j] = 1
+                    else:
+                        labels[j] = 0
+                df[y_name] = labels
+            else:
+                #Calculate what the next price will be
+                for i in range(self.n_predictions):
+                    step = (i+1)  # *-1
+                    df, y_name = percent_change_column('BTCClose', df, -step)
+
+            # print('Training data:')
+            # print(df.head(30))
+            features_to_use = list(df.columns)
+            # Remove the y labels from the 'features to use'
+            features_to_use.remove(y_name)
+                
+            # Make sure you aren't building a classifier based on the outputs of other classifiers
+            classifier_names = ['knn', 'mlp', 'svc', 'ridge']
+            for item in features_to_use:
+                for name in classifier_names:
+                    if name in item:
+                        features_to_use.remove(item)
+
+            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
+            print('Training data sample:')
+            print(df.head(30))
+            X = df[features_to_use].values
+            y = df[y_name].values
+            return X, y
+
+        elif label_type == 'mean in time period':
+            """Builds labels (0, 1) or % depending on predictor type as a column on the dataframe, return np arrays for X and y"""
+            df = input_df.copy()
+            token = 'BTC'
+
+            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
+            # print(df.isnull().values.any())
+
+            # These do time differencing for data stationarity
+            price_name = token + 'Close'
+            vol_name = token + 'Volume'
+            df = percent_change_column(price_name, df)
+            df = percent_change_column(vol_name, df)
+            
+            if self.is_classifier:
+                thresh = 0.15
+                # Calculate what the next price will be. 
+                # Create a matrix where each columns is the price a timestep in the future
+                all_labels = np.empty([df.shape[0],self.n_predictions])
+                y_name = (f'Period {str(self.n_predictions)} Mean % Change')
+                for i in range(self.n_predictions):
+                    step = (i+1)
+                    series = df['BTCClose'].shift(-step)
+                    
+                    all_labels = np.hstack((all_labels, np.atleast_2d(series).T)) 
+
+                # Take the mean accross the prices
+                summed_labels = np.sum(all_labels, axis = 1)
+
+                labels = np.empty_like(summed_labels)
+                for j, item in enumerate(summed_labels):
+                    if item > thresh:
+                        labels[j] = 1
+                    else:
+                        labels[j] = 0
+                df[y_name] = labels
+            else:
+                #Calculate what the next price will be
+                for i in range(self.n_predictions):
+                    step = (i+1)  # *-1
+                    df, y_name = percent_change_column('BTCClose', df, -step)
+
+            # print('Training data:')
+            # print(df.head(30))
+            features_to_use = list(df.columns)
+            # Remove the y labels from the 'features to use'
+            features_to_use.remove(y_name)
+                
+            # Make sure you aren't building a classifier based on the outputs of other classifiers
+            classifier_names = ['knn', 'mlp', 'svc', 'ridge']
+            for item in features_to_use:
+                for name in classifier_names:
+                    if name in item:
+                        features_to_use.remove(item)
+
+            df = df[np.isfinite(df).all(1)]     # keep only finite numbers
+            X = df[features_to_use].values
+            y = df[y_name].values
+            return X, y
 
 
     def build_feature(self, input_df):
@@ -86,10 +148,13 @@ class Predictor():
             y_predict = self.model.predict(X)
         except ValueError:
             print('Prediction not properly trained. Training on test data set. Recommended retrain.')
+            print("HEY")
+            print(self.model.get_params().keys())
             self.optimize_parameters(df)
             y_predict = self.model.predict(X)
         # print(f'y_shape {y_predict.shape}')
         df['BTC' + self.name] = y_predict
+        # print(y_predict[0:100])
         return df
 
 

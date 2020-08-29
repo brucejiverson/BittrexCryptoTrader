@@ -17,7 +17,7 @@ class ExchangeEnvironment(object):
     between different classes (eg simulated vs real exchange), and to make it easy to change that
     architecture by having change be in a single place."""
 
-    def __init__(self, gran, feature_dict):
+    def __init__(self, gran, feature_dict, train_data_amount=timedelta(days=60)):
 
         #get my keys
         with open(f_paths['secret']) as secrets_file:
@@ -25,9 +25,10 @@ class ExchangeEnvironment(object):
             secrets_file.close()
 
         #Need both versions of the interface as they each provide certain useful functions
-        self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
-        self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
-
+        # try:
+        self.bittrex_obj_1_1 = Bittrex('keys["key"]', keys["secret"], api_version=API_V1_1)
+        self.bittrex_obj_2 = Bittrex('keys["key"]', keys["secret"], api_version=API_V2_0)
+        # except 
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
         self.granularity = gran # minutes
@@ -77,6 +78,7 @@ class ExchangeEnvironment(object):
         self.candle_df_1min = None
         self.candle_df = None
         self.df = None
+        self.train_df = None
         self.transformed_df = None
         self.asset_data = None
         self.should_log = False
@@ -91,7 +93,7 @@ class ExchangeEnvironment(object):
         df['T'] = pd.to_datetime(df['T'], format="%Y-%m-%dT%H:%M:%S")
         df = df.rename(columns={'T': 'TimeStamp', 'O': ticker + 'Open', 'H': ticker +'High', 'L': ticker +'Low', 'C': ticker +'Close', 'V': ticker +'Volume'})
         df.set_index('TimeStamp', drop = True, inplace = True)
-        df.drop(columns=["BV"])
+        df.drop(columns=["BV"], inplace=True)
 
         #Reorder the columns
         df = df[[ticker +'Open', ticker +'High', ticker +'Low', ticker +'Close', ticker +'Volume']]
@@ -252,12 +254,22 @@ class ExchangeEnvironment(object):
         print('')
         df_gran = self._format_df(df_gran)
         df_gran.to_pickle(gran_path)
+
+        time_shift_from_bittrex = timedelta(hours=7)
+        # make a dataframe with the dates preceding the normal data frame for training data 
+        train_end =  start_date + time_shift_from_bittrex
+        train_start = train_end - timedelta(days=60)
+        
+        # train_df = df_gran.loc[(df_gran.index > start_date) & (df_gran.index < end_date)]       # This is the cheating one
+        train_df = df_gran.loc[(df_gran.index > train_start) & (df_gran.index <train_end)]      # this is the real one
+        self.train_df = train_df
+
         # Filter df_gran
-        df_gran = df_gran.loc[df_gran.index > start_date + timedelta(hours=7)]
-        df_gran = df_gran.loc[df_gran.index < end_date + timedelta(hours=7)]
+        df_gran = df_gran.loc[df_gran.index > start_date + time_shift_from_bittrex]
+        df_gran = df_gran.loc[df_gran.index < end_date + time_shift_from_bittrex]
 
         self.candle_df = df_gran # Completely resets the candle_df
-        return
+        # return
 
 
     def _format_df(self, df):
@@ -494,8 +506,6 @@ class AccountLog:
         # fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
         df.plot(y=token +'Close', ax=ax1)
         
-        df.plot(y='bb_bbl3', ax=ax1)
-        df.plot(y='bb_bbh3', ax=ax1)
         buys.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='^', c='g', zorder=4)
         sells.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='v', c='r', zorder=4)
         fig.autofmt_xdate()

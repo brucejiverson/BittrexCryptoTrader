@@ -7,19 +7,25 @@ import matplotlib.pyplot as plt
 features_to_view = [
                     # 'bb_bbm1', 'bb_bbh1', 'bb_bbl1', 'bb_bbm5', 'bb_bbh5', 'bb_bbl5', # 'bb_bbm10', 'bb_bbh10', 'bb_bbl10', 
                     # 'bb_bbli', 'bb_bbhi', 
-                    'BBInd3', 'BBInd5' #, 'BBInd10',
-                    # 'BTCOBV', 'BTCRSI'
+                    'BBInd3', 'BBInd5', 'BBInd10',
+                    
+                    'BBWidth3', 'BBWidth5', 'BBWidth10'
+                    # 'discrete_derivative': ['BBWidth3'],
+                    # 'BTCOBV', 
+                    # 'BTCRSI'
                     ] # This is the feature to visualize
                     
 start = datetime(2020, 6, 17)
-end = datetime(2020, 6, 22)
+end = datetime(2020, 8, 24)
 
 last_time_scraped = datetime.now() - timedelta(days = .25)
 
 features = {    # 'sign': ['Close', 'Volume'],
     # 'EMA': [50, 80, 130],
-    'BollingerBands': [1, 3, 5],
+    'BollingerBands': [1, 3, 5, 10],
     'BBInd': [],
+    'BBWidth': [],
+    'discrete_derivative': ['BBWidth3'],
     'OBV': [],
     'RSI': [],
     'time of day': [],
@@ -35,12 +41,12 @@ df = percent_change_column('BTCVolume', df, 1)
 
 # Look for small scale (0 - 1) features
 signal_features = []
-known_small_scale = ['BTCOBV', 'BTCRSI', 'BBInd1', 'BBInd5', 'BBInd10']
+known_small_scale = ['BTCOBV', 'BTCRSI', 'BBInd1', 'BBInd5', 'BBInd10', 'BBWidth1', 'BBWidth3', 'BBWidth5', 'BBWidth10']
 for f in features_to_view:
     series = df[f]
     high, low = max(series), min(series)
 
-    if high == 1 and low == 0 or f in known_small_scale:
+    if high < 10 and low > -10 or f in known_small_scale:
         signal_features.append(f)
 
 if not signal_features:

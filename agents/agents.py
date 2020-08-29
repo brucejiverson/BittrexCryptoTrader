@@ -1,13 +1,98 @@
 import numpy as np
 import warnings
-from tools.tools import maybe_make_dir, f_paths
+from tools.tools import maybe_make_dir, f_paths, ROI, percent_change_column
 import pickle
+import logging
+import stats
+
+logging.basicConfig(level=logging.CRITICAL)
+
+class scorer:
+    """This function scores the agent performance by summing the returns at each time step and dividing by std dev.
+    Summing roi of each timestep ensures equal weighting of all times (avoids prioritizing early trades)
+    Standard deviation is taken from sharpe, penalizes volatity in returns (adjusts for risk)."""
+    def __init__(self, history):
+        self.roi = None
+        self.sharpe = None
+        self.custom_score = None
+        self.calculate_scores(history)
+        self.trade_analysis(history)
+
+
+    def print_scores(self):
+        print(f'Return on investment: {round(self.roi, 2)}')
+        print(f'Sharpe ratio:         {round(self.sharpe, 2)}')
+        print(f'Custom score:         {round(self.custom_score, 2)}')
+        
+        
+    def calculate_scores(self, history):
+        df = history.copy()
+        self.roi = ROI(df['Total Value'].iloc[0], df['Total Value'].iloc[-1])
+        self.sharpe = self.roi/df['Total Value'].std()
+
+        df = percent_change_column('Total Value', df)
+        df = df[~df.isin([np.nan, np.inf, -np.inf]).any(1)]
+        col = df['Total Value'].values
+        std_dev = df['Total Value'].std()
+        if std_dev != 0:
+            self.custom_score = np.sum(col)/std_dev
+        else: 
+            self.custom_score = 0
+
+
+    def trade_analysis(self, history):
+        df = history.copy()
+        df['delta'] = df['Actions'] - df['Actions'].shift(1)  # Converts the column to % change
+        df['delta'].fillna(0)
+
+        df = percent_change_column('Total Value', df)
+        
+        buys = df[df['delta'] > 0]
+        sells = df[df['delta'] < 0]
+        
+        print(f'Number of buys: {buys.shape[0]}.')
+        print(f'Number of sells: {sells.shape[0]}.')
+        positions = []
+        lengths = []
+        # for i in range(len(buys)):
+        #     buy = buys.iloc[i]
+        #     sell = sells.iloc[i]
+
+        #     buy_val = buy.loc['$ of BTC']
+        #     sell_val = sell.loc['$ of BTC']
+
+
+        #     # print(buy.reset_index())
+        #     buy_time = buy.reset_index().columns[1]
+        #     sell_time = sell.reset_index().columns[1]
+        #     positions.append(sell_val - buy_val)
+        #     lengths.append(sell_time - buy_time)
+
+        # mean = sum(positions) / len(positions) 
+        # var = sum((i - mean) ** 2 for i in positions) / len(positions) 
+        # print(f'The mean and variance return for a trade cycle is mean: {mean}, var: {var}')
+        # mean = sum(lengths) / len(lengths) 
+        # var = sum((i - mean) ** 2 for i in lengths) / len(lengths) 
+        # print(f'The mean position time was {mean}, and the variance {var}')
+
+        # print(f'Mean of return ')
+
+
+    def get_scores(self):
+        return [self.roi, self.sharpe, self.custom_score]
+
 
 class Agent:
     """This is the class from which all other agents inherit from.
     The purpose is to enforce certain standards between all of the agents, 
     and to make additional functionality scale."""
     def __init__(self, name, feature_map, action_size):
+
+        #Creating an object 
+        self.logger=logging.getLogger() 
+        # logging.basicConfig(level=logging.DEBUG)
+        #Setting the threshold of logger to DEBUG 
+        # self.logger.setLevel(logging.DEBUG)
         self.name = name
         self.feature_map = feature_map # This is an ordered tuple that informs the agent what each of the numbers in the state means
         self.state_size = len(feature_map)
@@ -17,37 +102,55 @@ class Agent:
         self.stop_order = None
         self.trailing_stop_loss = None
         self.trailing_stop_order = None
-        # self.trade_conditions = {'stop loss': {'val': None, 'f': lambda price, stop: price <= stop},
-        #                         'stop order': {'val': None, 'f': lambda price, stop: price >= stop},
-        #                         'trailing stop loss': {'val': None, 'extreme': None, 'f':    lambda price, percent: price <= percent},
-        #                         'trailing stop order': {'val': None, 'extreme': None, 'f': lambda price, percent: price >= percent}
-        #                         }
+
         self.reset_trade_conditions()
+
+        self.states = (None)
+        self.state_index = 0
+        self.cur_state = None   # self.states[self.state_index]
+
+
+    def transition_states(self):
+        """This function will switch to the next state. currently, states are purely sequential, 
+        but eventually they may become more complex, this function will help to keep that logic clear"""
+        if self.state_index < len(self.states) - 1:
+            self.state_index += 1
+        else: 
+            self.state_index = 0
+        self.cur_state = self.states[self.state_index]
+        # print(self.cur_state)
+
 
     def check_set_trade_conditions(self, cur_price):
         """Checks if stop loss or other future trades had been previously set, and returns
         -1 if should sell, 0 if neutral, 1 if should buy"""
-
+        # self.logger.debug(self.trailing_stop_order)
+        
+        # self.logger.debug(f'{self.trailing_stop_loss}')
         #Check if value has been set
         if self.stop_loss:
             if cur_price <= self.stop_loss:
                 # Condition is triggered, reset and return
+                logging.debug('Stop loss triggered')
+
                 self.stop_loss = None
                 return -1
 
         #Check if value has been set
-        elif self.stop_order:
+        if self.stop_order:
             if cur_price >= self.stop_order:
                 # Condition is triggered, reset and return
+                logging.debug('Stop order triggered')
+
                 self.stop_order = None
                 return 1
 
         #Check if value has been set
-        elif self.trailing_stop_loss['percent']:
+        if self.trailing_stop_loss['percent']:
             # Check if new extreme has been reached
             highest = self.trailing_stop_loss['highest']
             trig_price = self.trailing_stop_loss['trigger price']
-            if cur_price > highest:
+            if cur_price > highest or highest is None:
                 self.trailing_stop_loss['highest'] = cur_price
                 highest = cur_price
                 # Update the trigger price
@@ -56,14 +159,15 @@ class Agent:
                 self.trailing_stop_loss['trigger price'] = trig_price # for debugging
             if cur_price <= trig_price:
                 # Condition is triggered
+                logging.debug('Trailing stop loss triggered')
                 return -1
         
         #Check if value has been set
-        elif self.trailing_stop_order['percent']:
+        if self.trailing_stop_order['percent']:
             # Check if new extreme has been found
             lowest = self.trailing_stop_order['lowest']
             trig_price = self.trailing_stop_order['trigger price']
-            if cur_price < lowest:
+            if cur_price < lowest or lowest is None:
                 self.trailing_stop_order['lowest'] = cur_price
                 lowest = cur_price
                 # Update the trigger price
@@ -74,9 +178,11 @@ class Agent:
 
             if cur_price >= trig_price:
                 # Condition is triggered
+                logging.debug('Trailing stop order triggered')
                 return 1
         else: return 0
     
+
     def reset_trade_conditions(self):
         self.stop_loss = None
         self.stop_order = None
@@ -129,7 +235,7 @@ class LinearModel():
         # we multiply by 2 to get the exact gradient
         # (not adjusting the learning rate)
         # i.e. d/dx (x^2) --> 2x
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
             Yhat = self.predict(X)
@@ -217,44 +323,37 @@ class knnAgent(Agent):
         super().__init__('knn algo', feature_map, action_size)
 
         self.last_action = 0
-
-
-    def act(self, state):
-
-        i = self.feature_map['BTCknn']
-        knn = state[i]      # Should be 0 or 1
-        action = int(knn)
-        return action
-
-
-class bollingerAgent(Agent):
-
-    def __init__(self, feature_map, action_size):
-        super().__init__('bollinger', feature_map, action_size)
-
-        self.last_action = 0
-        self.last_price = 0
+        
+        self.price_at_prediction = None
+        self.states = ('Waiting for prediction',
+                        'Holding')
 
     def act(self, state):
 
         i = self.feature_map['BTCClose']
-        price = state[i]      # Should be 0 or 1
-        i = self.feature_map['bb_bbli']
-        bbli = state[i]      # Should be 0 or 1
-        i = self.feature_map['bb_bbhi']
-        bbhi = state[i]      # Should be 0 or 1
-
-        # print(price)
-        if bbli == 1:
-            action = 0
-
-        elif bbhi == 1:
+        cur_price = state[i]
+        i = self.feature_map['BTCknn']
+        knn = state[i]      # Should be 0 or 1
+        
+        if knn == 1:
+            # Positive prediction of what is about to happen
             action = 1
-            # self.stop_loss = 0.995*price
-            # print(self.stop_loss)
-        else:
-            action = self.last_action
+            self.price_at_prediction = cur_price
+            self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
+            self.transition_states()
+        elif (cur_price - self.price_at_prediction)/self.price_at_prediction >= 0.15:
+            # sell for a profit
+            action = 0
+            self.reset_trade_conditions()
+            self.transition_states()
+        else: action = self.last_action
 
+        # handle stop loss and others for loss management
+        result = self.check_set_trade_conditions(cur_price)
+        if result == -1:    # Sell
+            self.transition_states()    # moves to waiting for buy signal
+            action = 0
+            self.reset_trade_conditions()
         self.last_action = action
         return action
 
@@ -284,40 +383,6 @@ class MeanReversionAgent(Agent):
         else: action = 0
 
         self.last_state = state
-        self.last_act = action
-        return action
-
-
-class EMAReversion(Agent):
-
-    def __init__(self, feature_map, action_size):
-        super().__init__('EMAReversion', feature_map, action_size)
-        self.last_act = 0
-        self.hyperparams = {'upper': 25, 'lower': 4}
-
-
-    def act(self, state):
-        features = state[-self.n_feat::].reshape((1, self.n_feat))
-        # print(state)
-        # print(features)
-
-        ddt_EMA_big = state[-1]
-        ddt_EMA_med = state[-2]
-        ddt_EMA_small = state[-3]
-
-        EMA_big = state[-4]
-        EMA_med = state[-5]
-        EMA_small = state[-6]
-        obv = state[-7]
-
-        if self.last_act == 0:
-            if EMA_small > self.hyperparams['upper'] :#or EMA_small > EMA_big:    #Need to buy
-                action = 1
-            else: action = self.last_act
-        elif EMA_small < self.hyperparams['lower'] and self.last_act == 1:  #Need to sell
-            action = 0
-        else: action = self.last_act
-
         self.last_act = action
         return action
 
@@ -363,48 +428,50 @@ class biteBack(Agent):
     used 0s in grid search that would skip some rules. Results: Best roi: 11.83, 
     best params: {'high thresh': 0.3, 'low thresh': 0.6, 'order': 2, 'loss': 0, 'stop loss': 5} (many were at edges of parameters)
     Expanded to a year long, reran with widened search: Best roi: 125.75, best params: 
-    {'ind base': 5, 'high thresh': 0.2, 'low thresh': 0.5, 'order': 3, 'loss': 0, 'stop loss': 7}"""
+    {'ind base': 5, 'high thresh': 0.2, 'low thresh': 0.5, 'order': 3, 'loss': 0, 'stop loss': 7}
+    Best roi: 81.81, best params: {'ind base': 10, 'high thresh': 0.2, 'low thresh': 0.5, 'order': 2, 'loss': 0, 'stop loss': 7}
+    Shorter seach with lots of params: Best params: {'ind base': 5, 'high thresh': 0.5, 'low thresh': 0.5, 'order': 0.1, 'loss': 1, 'stop loss': None}
+    Best params: {'ind base': 4, 'high thresh': 0.3, 'low thresh': 0.45, 'order': 0.25, 'loss': 1, 'stop loss': None}"""
     # Default hyperparams
-    h = {'ind base': 10,'high thresh': 0.25, 'low thresh': 0.55, 'order': 3, 'loss': 0, 'stop loss': 7}
+    h = {'ind base': 10,'high thresh': 0.25, 'low thresh': 0.55, 'order': 2.5, 'loss': 0, 'stop loss': 7}
     def __init__(self, feature_map, action_size, hyperparams = h):
-        super().__init__('doubleReverse', feature_map, action_size)
+        super().__init__('biteBack', feature_map, action_size)
 
         self.last_action = 0
         self.reset_trade_conditions()
         
         self.hyperparams = hyperparams
         # self.trailing_stop_order['percent'] = self.hyperparams['order']
-        self.states = (
-                        'waiting for buy signal', 
+        self.states = ('waiting for buy signal', 
                         'trailing stop order', 
                         'waiting for sell signal', 
                         'trailing stop loss')
         self.state_index = 0
         self.cur_state = self.states[self.state_index]
 
-    def transition_states(self):
-        """This function will switch to the next state. currently, states are purely sequential, 
-        but eventually they may become more complex, this function will help to keep that logic clear"""
-        if self.state_index >= len(self.states) - 1:
-            self.state_index += 1
-        else: 
-            self.state_index = 0
-
 
     def act(self, state):
 
+        # if self.cur_state == 'trailing stop loss':
+        #     print(self.trailing_stop_loss)
         i = self.feature_map['BTCClose']
         cur_price = state[i]      # Should be 0 or 1
         ind_name = 'BBInd' + str(self.hyperparams['ind base'])
         i = self.feature_map[ind_name]
         bbind = state[i]      # Should be 0 or 1
         
+        # Rules for transitioning states
+        # Note that states also change when a trade is triggered
         if self.cur_state == 'waiting for buy signal':
             if bbind < -self.hyperparams['low thresh']:
                 self.trailing_stop_order['percent'] = self.hyperparams['order']
-        elif self.cur_state == 'waiting for sell signal ':
+                self.transition_states()
+        # elif self.cur_state == 'trailing stop order':
+        #     if bbind 
+        elif self.cur_state == 'waiting for sell signal':
             if bbind > self.hyperparams['high thresh']:
                 self.trailing_stop_loss['percent'] = self.hyperparams['loss']
+                self.transition_states()
 
         result = self.check_set_trade_conditions(cur_price)
         if result == -1:    # Sell
@@ -419,6 +486,178 @@ class biteBack(Agent):
         else: action = self.last_action
         # print(f'stop loss {self.trailing_stop_loss}')
         # print(f'stop order {self.trailing_stop_order}')
+        self.last_action = action
+        return action
+
+
+class probabilityAgent(Agent):
+    """This agent uses a feature built on probability analysis"""
+    # Default hyperparams
+    h = {}
+    def __init__(self, feature_map, action_size, hyperparams = h):
+        super().__init__('probability agent', feature_map, action_size)
+
+        self.last_action = 0
+        self.reset_trade_conditions()
+
+        self.periods_since_buy = 0
+        self.certainty_thresh = 0.55
+        
+        self.hyperparams = hyperparams
+        # self.trailing_stop_order['percent'] = self.hyperparams['order']
+        self.states = ('waiting for buy signal', 
+                        'waiting to sell')
+        self.state_index = 0
+        self.cur_state = self.states[self.state_index]
+
+
+    def act(self, state):
+
+        i = self.feature_map['BTCClose']
+        cur_price = state[i]
+
+        i = self.feature_map['Likelihood of buy given x']
+        buy_given_x = state[i]      # Should be 0 or 1
+        
+        i = self.feature_map['Likelihood of sell given x']
+        sell_given_x = state[i]      # Should be 0 or 1
+        
+        # Rules for transitioning states
+        # Note that states also change when a trade is triggered
+        if self.cur_state == 'waiting for buy signal':
+            if buy_given_x >= self.certainty_thresh:
+                self.reset_trade_conditions()
+                action = 1
+                # self.stop_loss = cur_price*1.001
+                # self.trailing_stop_loss['percent'] = .5
+                self.transition_states()
+            
+            else: action = self.last_action
+
+        elif self.cur_state == 'waiting to sell':
+            if sell_given_x >= self.certainty_thresh:
+                # sell immediately
+                self.reset_trade_conditions()
+                action = 0
+                self.transition_states()
+            else: action = self.last_action
+
+        result = self.check_set_trade_conditions(cur_price)
+        if result == -1:    # Sell
+            self.transition_states()    # moves to waiting for buy signal
+            action = 0
+            self.reset_trade_conditions()
+        # elif result == 1:   # Buy
+        #     self.transition_states()    # moves to trailing stop loss
+        #     self.reset_trade_conditions()
+        #     self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
+        #     action = 1
+        # else: action = self.last_action
+        # print(f'stop loss {self.trailing_stop_loss}')
+        # print(f'stop order {self.trailing_stop_order}')
+        self.last_action = action
+        return action
+
+
+
+class simpleBiteBack(Agent):
+    """This agent uses trailing stops and bollinger bands to capture mean reversion"""
+    """ """
+    # Default hyperparams
+    h = {'ind base': 10,'high thresh': 0.25, 'low thresh': 0.45, 'stop loss': 3}
+    def __init__(self, feature_map, action_size, hyperparams = h):
+        super().__init__('simpleBiteBack', feature_map, action_size)
+
+        self.last_action = 0
+        self.reset_trade_conditions()
+        
+        self.hyperparams = hyperparams
+        # self.trailing_stop_order['percent'] = self.hyperparams['order']
+        self.states = ('waiting for buy signal', 
+                        'waiting for sell signal')
+        self.state_index = 0
+        self.cur_state = self.states[self.state_index]
+
+
+    def transition_states(self):
+        """This function will switch to the next state. currently, states are purely sequential, 
+        but eventually they may become more complex, this function will help to keep that logic clear"""
+        if self.state_index < len(self.states) - 1:
+            self.state_index += 1
+        else: 
+            self.state_index = 0
+        self.cur_state = self.states[self.state_index]
+        # print(self.cur_state)
+
+
+    def act(self, state):
+
+        # if self.cur_state == 'trailing stop loss':
+        #     print(self.trailing_stop_loss)
+        i = self.feature_map['BTCClose']
+        cur_price = state[i]      # Should be 0 or 1
+        ind_name = 'BBInd' + str(self.hyperparams['ind base'])
+        i = self.feature_map[ind_name]
+        bbind = state[i]      # Should be 0 or 1
+        
+        # Rules for transitioning states
+        # Note that states also change when a trade is triggered
+        action = self.last_action                           # default
+        if self.cur_state == 'waiting for buy signal':
+            if bbind < -self.hyperparams['low thresh']:
+                action = 1
+                self.transition_states()
+                self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
+
+        # elif self.cur_state == 'trailing stop order':
+        #     if bbind 
+        elif self.cur_state == 'waiting for sell signal':
+            if bbind > self.hyperparams['high thresh']:
+                action = 0
+                self.transition_states()
+
+        
+        # logging.debug(f"{self.trailing_stop_loss}")
+
+        result = self.check_set_trade_conditions(cur_price)
+        if result == -1:    # Sell
+            self.transition_states()    # moves to waiting for buy signal
+            action = 0
+            self.reset_trade_conditions()
+        elif result == 1:   # Buy
+            self.transition_states()    # moves to trailing stop loss
+            self.reset_trade_conditions()
+            action = 1
+        
+        # print(f'stop loss {self.trailing_stop_loss}')
+        # print(f'stop order {self.trailing_stop_order}')
+        self.last_action = action
+        return action
+
+
+class TestLogic(Agent):
+    # Default hyperparams
+    def __init__(self, feature_map, action_size):
+        super().__init__('testTradeFunctionality', feature_map, action_size)
+
+        self.last_action = 0
+        self.reset_trade_conditions()
+
+    def act(self, state):
+
+        i = self.feature_map['BTCClose']
+        cur_price = state[i]      # Should be 0 or 1
+        # print(cur_price)
+        result = self.check_set_trade_conditions(cur_price)
+        # print(result)
+        # print(self.trailing_stop_loss)
+        if result == -1:    # Sell
+            action = 0
+            self.reset_trade_conditions()
+        elif result == 1:   # Buy
+            self.reset_trade_conditions()
+            action = 1
+        else: action = self.last_action
         self.last_action = action
         return action
 
