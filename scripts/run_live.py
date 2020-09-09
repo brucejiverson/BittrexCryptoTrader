@@ -20,19 +20,23 @@ def roundTime(dt=None, roundTo=60):
  
  # Leave this intact when running consecutive backtests and switching between modes
 features = {  # 'sign': ['Close', 'Volume'],
-    # 'EMA': [50, 80, 130],
-    'OBV': [],
-    'RSI': [],
-    # 'high': [],
-    # 'low': [],
-    'BollingerBands': [15],
-    'BBInd': [],
-    # 'time of day': [],
-    # 'knn':[]
-    # 'stack': [0]
-    }
+        # 'EMA': [50, 80, 130],
+        'OBV': [],
+        'RSI': [],
+        # 'high': [],
+        # 'low': [],
+        'BollingerBands': [3],
+        'BBInd': [],
+        'BBWidth': [],
+        'discrete_derivative': ['BBWidth3'],
+        # 'time of day': [],
+        # 'stack': [2],
+        # 'rolling probability': ['BBInd3', 'BBWidth3']
+        'probability': ['BBInd3', 'BBWidth3']
+        # 'knn':[],
+        }
 
-env = BittrexExchange(granularity=30, feature_dict=features, verbose=3)
+env = BittrexExchange(granularity=5, feature_dict=features, window_size=25, verbose=3)
 state = env.reset()
 
 feature_list = env.df.columns
@@ -41,15 +45,19 @@ for i, item in enumerate(feature_list):
     feature_map[item] = i
 action_size = len(env.action_space)
 
+# Bite Back
 hyperparams = {'ind base': 15,
-                        'high thresh': .2,  # these are fraction base on BBInd (custom indicator)
-                        'low thresh': .5,
-                        'order': 3,                      # these are percentages for trailing orders
-                        'loss': 0,
-                        'stop loss': 6}
+                'high thresh': .2,  # these are fraction base on BBInd (custom indicator)
+                'low thresh': .5,
+                'order': 3,                      # these are percentages for trailing orders
+                'loss': 0,
+                'stop loss': 6}
+hyperparams = {'buy thresh': .55,
+                'sell thresh': .5,
+                'stop loss': .98}
 
-agent = biteBack(feature_map, action_size, hyperparams)
-
+# agent = biteBack(feature_map, action_size, hyperparams)
+agent = probabilityAgent(feature_map, action_size, hyperparams)
 
 # Load agent models
 if agent.name == 'dqn':
@@ -65,11 +73,11 @@ if agent.name == 'dqn':
 print('\n Oohh wee, here I go trading again! \n')
 
 start_time = datetime.now()
-loop_frequency = 60*env.granularity #seconds
+loop_frequency = 60*env.granularity/2 #seconds
 
 while True: # datetime.now() < start_time + timedelta(hours = .5):
     loop_start = datetime.now()
-    bittrex_time = roundTime(datetime.now() + timedelta(hours = 7))
+    bittrex_time = roundTime(datetime.now() + timedelta(hours=7))
 
     # print(f'It is now {bittrex_time} on the Bittrex Servers.')
     state = env.update() #This fetches data and preapres it, and also gets

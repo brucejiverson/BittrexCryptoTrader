@@ -1,6 +1,6 @@
 from agents.agents import *
 from environments.environments import *
-from tools.tools import maybe_make_dir, printProgressBar, f_paths, ROI, percent_change_column
+from tools.tools import *
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,14 +42,15 @@ def test(features, granularity=5):
     # end = datetime(year=2020, month=7, day=8)
     # start = end - timedelta(hours = 1, days = 1, weeks=4)
 
-    start = datetime(year=2020, month=1, day=1)
-    end = datetime(year=2020, month=9, day=1)
-
+    start = datetime(year=2020, month=5, day=1)
+    end = datetime(year=2020, month=9, day=30)
     print(f'Backtesting from {start} to {end}.')
     initial_investment = 100
     print(features)
-    sim_env = SimulatedCryptoExchange(start, end, granularity=granularity, feature_dict=features)
-
+    sim_env = SimulatedCryptoExchange(start, end, granularity=granularity, feature_dict=features, train_amount=20)
+    print('done building')
+    print(sim_env.df.iloc[0:50])
+    # print(sim_end.df.head())
     # Build a mapping of features so that the agent knows what each value in the state means what
     feature_list = sim_env.df.columns
     feature_map = {}
@@ -58,20 +59,20 @@ def test(features, granularity=5):
 
     action_size = len(sim_env.action_space)
     # Biteback(s)
-    hyperparams = {'ind base': 3,
-                'high thresh': .1,             # these are fraction base on BBInd (custom indicator)
-                'low thresh': .5,
-                'order': .1,                    # these are percentages for trailing orders
-                'loss': .1,
-                'stop loss': 4}
+    # hyperparams = {'ind base': 3,
+    #             'high thresh': .1,             # these are fraction base on BBInd (custom indicator)
+    #             'low thresh': .5,
+    #             'order': .1,                    # these are percentages for trailing orders
+    #             'loss': .1,
+    #             'stop loss': 4}
 
     # hyperparams = {'stop loss':[None]}
 
     agents = [
-            probabilityAgent(feature_map, action_size)
+            probabilityAgent(feature_map, action_size, {'buy thresh':.55, 'sell thresh': 0.5, 'stop loss': .98})
             # biteBack(feature_map, action_size, hyperparams),
             # simpleBiteBack(feature_map, action_size, hyperparams),
-            # knnAgent(feature_map, action_size, hyperparams),
+            # knnAgent(feature_map, action_size),
             # MeanReversionAgent(feature_map, action_size),
             # bollingerAgent(feature_map, action_size),
             # doubleReverse(feature_map, action_size),
@@ -140,16 +141,22 @@ def grid_search(features):
     parameters = {
                 'agent': {'stop loss': [.5, 1, 1.5]}
                 }
+
+    # for probability
+    parameters = {
+                'agent': {'buy thresh': [.5, .55, .6, .65, .7],
+                        'sell thresh': [.4, .45, .5, .55, .6],
+                        'stop loss': [.97, .985, .995, .99, None]}
+    }
     
-    start = datetime(year=2020, month=1, day=1)
-    end = datetime(year=2020, month=5, day=14)
+    start = datetime(year=2019, month=4, day=1)
+    end = datetime(year=2020, month=4, day=30)
 
     print(f'Backtesting from {start} to {end}.')
     initial_investment = 100
-    
 
 
-    sim_env = SimulatedCryptoExchange(start, end, granularity=5, feature_dict=features)
+    sim_env = SimulatedCryptoExchange(start, end, granularity=5, feature_dict=features, train_amount=20)
     sim_env.should_log = True
     feature_list = sim_env.df.columns
     feature_map = {}
@@ -172,11 +179,12 @@ def grid_search(features):
     keys, values = zip(*params.items())
     for experiment in itertools.product(*values):
         exp_dict = dict(zip(keys, experiment))
-        print(f'Preprocessing data for hyperparameters: {exp_dict}')
+        print(f'Running simulation for hyperparameters: {exp_dict}')
 
         # Initialize the agent
         # agent = knnAgent(feature_map, action_size, hyp
-        agent = simpleBiteBack(feature_map, action_size, hyperparams=best_params)
+        agent = probabilityAgent(feature_map, action_size, hyperparams=exp_dict)
+        # agent = simpleBiteBack(feature_map, action_size, hyperparams=exp_dict)
         # agent = biteBack(feature_map, action_size, hyperparams=exp_dict)
         # agent = MeanReversionAgent(feature_map, action_size)
         # agent = bollingerAgent(feature_map, action_size)
@@ -190,7 +198,9 @@ def grid_search(features):
             best_score, best_params = s.custom_score, exp_dict
     
     print(f'Best params: {best_params}')
-    agent = simpleBiteBack(feature_map, action_size, hyperparams=best_params)
+    
+    agent = probabilityAgent(feature_map, action_size, hyperparams=best_params)
+    # agent = simpleBiteBack(feature_map, action_size, hyperparams=best_params)
     # agent = biteBack(feature_map, action_size, hyperparams=best_params)
     # create a log
     val = play_one_episode(agent, sim_env, mode)
@@ -302,14 +312,15 @@ if __name__ == '__main__':
         'RSI': [],
         # 'high': [],
         # 'low': [],
-        'BollingerBands': [2, 3, 5],
+        'BollingerBands': [3, 4, 5],
         'BBInd': [],
         'BBWidth': [],
-        'discrete_derivative': ['BBWidth3'],
+        'discrete_derivative': ['BBWidth3', 'BBWidth4', 'BBWidth5'],
         # 'time of day': [],
+        # 'stack': [2],
+        'rolling probability': ['BBInd3', 'BBWidth3']
+        # 'probability': ['BBInd3', 'BBWidth3']
         # 'knn':[],
-        # 'stack': [3]
-        'probability': ['BBInd3', 'BBWidth3']
         }
 
     if mode == 'test':

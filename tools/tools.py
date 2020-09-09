@@ -68,7 +68,7 @@ def percent_change_column(col_name, input_df, shift_val=1):
     if < 0, adds a new column with the future change"""
     df = input_df.copy()
     if shift_val > 0:
-        df[col_name] = (df[col_name] - df[col_name].shift(shift_val, fill_value=0))/df[col_name].shift(shift_val, fill_value=0)
+        df[col_name] = df[col_name]/df[col_name].shift(shift_val, fill_value=0) - 1
         df[col_name] = 100*df[col_name].fillna(0)
         df.replace([np.inf, -np.inf], np.nan)
         df.dropna(inplace=True)

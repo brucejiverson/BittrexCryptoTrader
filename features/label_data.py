@@ -3,11 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd 
 
-def make_criteria(input_df,  target_change=.15, allowable_reversal=-.15, target_time_range=13):
+def make_criteria(input_df,  target_change=.15, allowable_reversal=-.15, target_time_range=13, buy_not_sell=True):
         # This is currently symmetric (prediction mirrored conditions for buy/sell signals)
         df = input_df.copy()
 
-        #Loop to create percentage columns
+        #Loop to create percentage columns to look into the future
         generated_names = []
         for i in range(target_time_range):
             df, label_name = percent_change_column('BTCClose', df, -(i+1))
@@ -19,13 +19,107 @@ def make_criteria(input_df,  target_change=.15, allowable_reversal=-.15, target_
         # Calculate some basic parameters around take profit and downdraw (I may be using that word wrong?)
         df['Max increase'] = df[generated_names].max(axis=1)
         df['Max decrease'] = df[generated_names].min(axis=1)
-        df['Labels'] = np.zeros(df.shape[0])      # Initialize as all samples as "not suitable for buying"
-        df.loc[(df['Max increase'] > target_change) & (df['Max decrease'] > allowable_reversal), 'Labels'] = 1        # Predicted its going up
-        df.loc[(df['Max increase'] < -allowable_reversal) & (df['Max decrease'] < -target_change), 'Labels'] = -1     # Predicted its going down
-        
+        if buy_not_sell:
+            df['Buy Labels'] = np.zeros(df.shape[0])      # Initialize as all samples as "not suitable for buying"
+            df.loc[(df['Max increase'] > target_change) & (df['Max decrease'] > allowable_reversal), 'Buy Labels'] = 1        # Predicted its going up
+        else:
+            df['Sell Labels'] = np.zeros(df.shape[0])      # Initialize as all samples as "not suitable for selling"
+            df.loc[(df['Max increase'] < -allowable_reversal) & (df['Max decrease'] < -target_change), 'Sell Labels'] = 1     # Predicted its going down
+
         # Drop the temporary columns
         df.drop(columns=['Max increase', 'Max decrease', *generated_names], inplace=True)
         return df
+
+
+def plot_make_criteria(input_df):
+    df = input_df.copy()
+    fig, ax = plt.subplots(1, 1)
+
+    input_df.plot(y='BTCClose', ax=ax)  
+    # print(df.head())
+    # print(df.reset_index().head())
+    for name in ['Buy Labels', 'Sell Labels']:
+        data = input_df[input_df[name] == 1]
+        
+        # Enforce different colors for buys and sells
+        if 'buy' in name.lower():
+            data.reset_index().plot(y = 'BTCClose', x='index', ax=ax, kind='scatter', marker='^', c='g', zorder=4)
+        elif 'sell' in name.lower():
+            data.reset_index().plot(y = 'BTCClose', x='index', ax=ax, kind='scatter', marker='v', c='r', zorder=4)
+        fig.autofmt_xdate()
+        fig.suptitle(f'Make criteria', fontsize=14, fontweight='bold')
+
+
+# def build_filtered_label(self, input_df, names):
+#     # For now, not doing train/test split, but this function should do that, use cross validation, and then rebuild all. I think
+#     df = input_df.copy()
+
+#     # Calculate the probabilities for each sample (evaluation of training data)
+    
+#     # Get the kernels that should have been made earlier
+#     x_kernel = self.kernels['x']
+#     x_given_buy_kernel = self.kernels['x given buy']
+#     x_given_sell_kernel = self.kernels['x given sell']
+    
+#     # The positions in the feature space at which to evaluate the kernels
+#     positions = df[names].values.T
+
+#     # Evaluate the kernels at positions
+#     x_pde = x_kernel(positions).T
+#     x_given_buy = x_given_buy_kernel(positions).T
+#     x_given_sell = x_given_sell_kernel(positions).T
+
+#     # Use bayes theorem to calculate the liklihood
+#     buy_given_x = np.multiply(x_given_buy, self.prob_of_buy_signal)                                      # multiply by odds of getting buy sig
+#     buy_given_x = np.divide(buy_given_x, x_pde, out=np.zeros_like(buy_given_x), where=x_pde!=0)     # divide by probability of getting a sample at X
+    
+#     sell_given_x = np.multiply(x_given_sell, self.prob_of_sell_signal)                                   # multiply by odds of getting sell sig
+#     sell_given_x = np.divide(sell_given_x, x_pde, out=np.zeros_like(sell_given_x), where=x_pde!=0)  # divide by probability of getting a sample at X
+
+#     # Build columns in the dataframe (mostly used for plotting? And also filtering I think)
+#     df['Likelihood of buy given x'] = buy_given_x
+#     df['Likelihood of sell given x'] = sell_given_x
+
+#     # This worked with >70% untuned on training data when relative prob was difference. Thresh = .005
+#     thresh = 0.65
+#     # df['Prediction'] = np.zeros(df.shape[0])
+#     # df.loc[(df['Likelihood of buy given x'] >= thresh), 'Prediction'] = 1
+#     # df.loc[(df['Likelihood of sell given x'] >= thresh), 'Prediction'] = -1
+#     # df.loc[(df['Likelihood of sell given x'] >= thresh), (df['Likelihood of buy given x'] >= thresh), 'Prediction'] = 0         # This should never happen, its here just in case
+
+#     n_buy_sigs = df.loc[(df['Likelihood of buy given x'] >= thresh)].shape[0]
+#     mean_buy_freq = (24*60/5)*n_buy_sigs/df.shape[0]        # signals per sample *(1/ 5 minutes/sample)*60*24 minutes/day = signals/day
+#     print(f'Mean of {mean_buy_freq} buy signals per day')
+#     n_sell_sigs = df.loc[(df['Likelihood of sell given x'] >= thresh)].shape[0]
+#     mean_buy_freq = (24*60/5)*n_sell_sigs/df.shape[0]        # signals per sample *(1/ 5 minutes/sample)*60*24 minutes/day = signals/day
+#     print(f'Mean of {mean_buy_freq} sell signals per day')
+
+#     # Drop unwanted columns
+#     # cols = ['Likelihood of buy given x', 'Likelihood of sell given x']
+#     # df.drop(columns=cols, inplace=True)
+#     return df
+
+if __name__ == "__main__":
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--name', type=str, required=True,)
+    # args = parser.parse_args()
+    # name = args.name
+    from environments.environments import SimulatedCryptoExchange
+    from datetime import datetime
+    #date range to train on
+    start = datetime(2020, 8, 1)
+    end = datetime(2020, 9, 1) #- timedelta(days = 1)
+    features = {  # 'sign': ['Close', 'Volume'],
+        
+        }
+    sim_env = SimulatedCryptoExchange(granularity=5, feature_dict=features)
+
+    df = sim_env.df.copy()              # This is the dataframe with all of the features built.
+
+    df = make_criteria(df)
+    df = make_criteria(df, buy_not_sell=False)
+    plot_make_criteria(df)
+    plt.show()
 
 # if label_type == 'standard':
 #             """Builds labels (0, 1) or % depending on predictor type as a column on the dataframe, return np arrays for X and y"""
@@ -146,21 +240,6 @@ def make_criteria(input_df,  target_change=.15, allowable_reversal=-.15, target_
 #             X = df[features_to_use].values
 #             y = df[y_name].values
 #             return X, y
-
-#     def plot_make_criteria(input_df, label_name):
-#         df = input_df.copy()
-#         fig, ax = plt.subplots(1, 1)
-
-#         input_df.plot(y='BTCClose', ax=ax)
-#         print(df.head())
-#         print(df.reset_index().head())
-#         buys = input_df[input_df[label_name] == 1]
-#         sells = input_df[input_df[label_name] == -1]
-#         buys.reset_index().plot(y = 'BTCClose', x='index', ax=ax, kind='scatter', marker='^', c='g', zorder=4)
-#         sells.reset_index().plot(y = 'BTCClose', x='index', ax=ax, kind='scatter', marker='v', c='r', zorder=4)
-#         fig.autofmt_xdate()
-#         fig.suptitle(f'Make criteria', fontsize=14, fontweight='bold')
-
 
 #     def analyze_make_criteria(self, df):
 #         # splits data at 80% train 80% test by default

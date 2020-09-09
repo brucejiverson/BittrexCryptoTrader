@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import ta
 from features.classifiers import knn_classifier, mlp_classifier, svc_classifier
+from features.label_data import make_criteria
 from features.probability import statisticsBoy
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from tools.tools import percent_change_column
 
@@ -162,16 +163,93 @@ def stack(n, df, mode='Close'):
         return new_df
 
 
-def build_features(testing_df, markets, feature_dict, training_df=None):
+def probability(test_df, train_df, names):
+    # Feature names are passed to the constructor
+    my_stats = statisticsBoy()
+    train_df = make_criteria(train_df, target_time_range=13)
+    train_df = make_criteria(train_df, target_time_range=13, buy_not_sell=False)
+    my_stats.do_analysis(train_df, names)        # Statistical analysis on the training data
+    df = my_stats.build_feature(test_df, names)      # Making predictions on the testing data
+    return df
+
+
+def rolling_probability(testing_df, training_df, names):
+
+    # Create copies as we are going to alter and return the frames
+    train_df = training_df.copy()
+    test_df = testing_df.copy()
+
+    # Print out some information about the dates (convert this to logging later)
+    print('')
+    print(f'train df start date: {train_df.index.min()}')
+    print(f'train df end date:   {train_df.index.max()}')
+    print(f'test df start date:  {test_df.index.min()}')
+    print(f'test df end date:    {test_df.index.max()}')
+
+    # Feature names are passed to the constructor
+    window_size = timedelta(days=21)
+    my_stats = statisticsBoy()
+    my_stats = statisticsBoy()
+    train_df = make_criteria(train_df, target_time_range=13)
+    train_df = make_criteria(train_df, target_time_range=13, buy_not_sell=False)
+    
+    test_df = make_criteria(test_df, target_time_range=13)
+    test_df = make_criteria(test_df, target_time_range=13, buy_not_sell=False)
+
+    new_df = pd.DataFrame()
+    # get the first training window from the training df
+    training_start_date = test_df.index.max() - window_size
+    training_window = train_df.loc[train_df.index > training_start_date]
+
+    # Initialize the dates (for loop conditions check)
+    prediction_start_date = training_start_date + window_size
+    prediction_end_date = prediction_start_date + window_size
+    first_done = False        # This ensures loop will run at least once
+    while prediction_end_date < test_df.index.max() or not first_done:
+        print('loop')
+        print(prediction_end_date < test_df.index.max())
+        print(f'Prediction end date {prediction_end_date}')
+        print(f'Test max date {test_df.index.max()}')
+        print(train_df.head())
+
+        # Shift the dates
+        prediction_start_date = training_start_date + window_size
+        prediction_end_date = prediction_start_date + window_size
+
+        # get the two windows (trainging and predicting)
+        if not first_done:
+            training_window = test_df.loc[test_df.index > training_start_date]            # The training window
+            training_window = test_df.loc[test_df.index <= prediction_start_date]          # The training window
+            first_done = True
+
+        prediction_window = test_df.loc[test_df.index > prediction_start_date]            # The prediction window
+        prediction_window = test_df.loc[test_df.index <= prediction_end_date]              # The prediction window
+
+        # Train
+        # print('Training window:')
+        # print(training_window.head())
+        my_stats.do_analysis(training_window, names)                                    # Statistical analysis on the training data
+
+        # Build 
+        built_df = my_stats.build_feature(prediction_window, names)
+        # print('Build df:')
+        # print(built_df.head())
+        new_df = new_df.append(built_df)                                                # Making predictions on the testing data
+        training_start_date += window_size
+        
+    new_df.drop(columns=['Buy Labels', 'Sell Labels'], inplace=True)
+    return new_df.copy()
+
+
+def build_features(input_df, markets, feature_dict, train_amount=30):
         """This method takes the raw candle data and constructs features based on the provided list of strings"""
         
         print('Constructing features... ', end = ' ')
         
         if feature_dict is None:
             print('no features built.')
-            return candle_df
-        test_df = testing_df.copy()       # At this higher level, it is safer to construct a new dataframe instead of modifying the one that gets passed.
-        train_df = training_df.copy()
+            return input_df
+        df = input_df.copy()       # At this higher level, it is safer to construct a new dataframe instead of modifying the one that gets passed.
         #This section constructs engineered features and adds them as columns to the df
         """ If you change the number of indicators in this function, be sure to also change the expected number in the enviroment"""
 
@@ -180,15 +258,14 @@ def build_features(testing_df, markets, feature_dict, training_df=None):
                                     'OBV', 'EMA', 'MACD', 'RSI', 'BollingerBands', 'BBInd', 'BBWidth',
                                     'sentiment', 'renko', 'time of day', 'discrete_derivative',
                                     'knn', 'mlp', 'svc', 'ridge', 'stack',
-                                    'probability']
+                                    'probability', 'rolling probability']
         for f in feature_dict:           # Iterate over the keys
             if not f in acceptable_feature_names:
                 print('An unrecognized feature has been passed to the feature contructor (not in the acceptable feature list).')
                 print(f'Illegal feature: {f}')
                 raise(ValueError)
-        print(feature_dict)
-        #Add the features to the df. It would be great to have a dict of features and functions but im not sure how to do that
-        for df in [test_df, train_df]:
+
+            # Add the features to the df. It would be great to have a dict of features and functions but im not sure how to do that
             for market in markets:
                 token = market[4:7] #this is something like 'BTC' or 'ETH'
                 for feature in feature_dict:               # Iterate over the keys
@@ -276,13 +353,8 @@ def build_features(testing_df, markets, feature_dict, training_df=None):
                         n = feature_dict[feature][0]
                         df = stack(n, df)
                     elif feature == 'knn':
-                        hyperparams = {'polynomial_features__degree': (1, 2, 3, 4), 
-                        'knn__n_neighbors': (2, 3, 4, 5, 6, 7, 8, 9)}
-                        knn = knn_classifier(token, hyperparams, n_predictions=5)
-                        knn.load()
-                        # knn.optimize_parameters(df)
-                        # knn.train(df)
-                        df = knn.build_feature(df)
+                        pass
+
                     elif feature == 'mlp':
                         hyperparams = {'polynomial_features__degree': (1, 2, 3, 4, 5)}
                         mlp = mlp_classifier(token, hyperparams)
@@ -300,35 +372,82 @@ def build_features(testing_df, markets, feature_dict, training_df=None):
                         # svc.optimize_parameters(df)
                         # svc.train(df)
                         df = svc.build_feature(df)
-                    elif feature == 'probability':
+                    elif feature in ['probability', 'rolling probability']:
+                        # These get handled later
                         pass
                         
                     else:
                         print(f'Feature: {feature} not found.')
 
-                if bb_drop == True:
-                    for feature in feature_dict['BollingerBands']:
-                        names = [n + str(feature) for n in ['bb_bbl', 'bb_bbm', 'bb_bbh']]
-                        try:
-                            df.drop(columns=names, inplace=True)
-                        except KeyError:
-                            print(f'Error dropping column {names}')
-                            print(df.columns)
-                            # print(df.loc[names].iloc[0])
-            
+                try:
+                    if bb_drop == True:
+                        for feature in feature_dict['BollingerBands']:
+                            names = [n + str(feature) for n in ['bb_bbl', 'bb_bbm', 'bb_bbh']]
+                            try:
+                                df.drop(columns=names, inplace=True)
+                            except KeyError:
+                                print(f'Error dropping column {names}')
+                                print(df.columns)
+                                # print(df.loc[names].iloc[0])
+                except UnboundLocalError:
+                    pass
+        
+        # Create the training df (for ml, probability etc) Note that this gets done everytime regardless of whether its needed or not
+        
+        train_df = df.copy()
+        # alter the train and test datasets
+        if train_amount != 0:
+            print('hey im splitting the dataset')
+            split_date = train_df.index.min() + timedelta(days = train_amount)
+            train_df = train_df.loc[train_df.index < split_date]
+            df = df.loc[df.index >= split_date]
+        
         # separated out for easy looping over both dicts with the other functions. Useful for lazy learners
         if 'probability' in feature_dict.keys():
-            assert(not train_df is None)        # Need training data to do this properly
-            # Feature names are passed to the constructor
-            feat1_name, feat2_name = feature_dict['probability']
-            my_stats = statisticsBoy(target_change=0.1, allowable_reversal=-.5)
-            temp_df = my_stats.make_criteria(train_df, target_time_range=13)
-            my_stats.do_analysis(temp_df, [feat1_name, feat2_name])
-            test_df = my_stats.build_feature(test_df, [feat1_name, feat2_name])
+            df = probability(df, train_df, feature_dict['probability'])
+
+        elif 'rolling probability' in feature_dict.keys():
+            df = rolling_probability(df, train_df, feature_dict['rolling probability'])
+
+        if 'knn' in feature_dict.keys():
+            # Replacing infinite with nan 
+            train_df.replace([np.inf, -np.inf], np.nan, inplace=True) 
+            
+            # Dropping all the rows with nan values 
+            train_df.dropna(inplace=True) 
+            # Replacing infinite with nan 
+            df.replace([np.inf, -np.inf], np.nan, inplace=True) 
+            
+            # Dropping all the rows with nan values 
+            df.dropna(inplace=True)
+            
+            # Hyperparameters
+            hyperparams = {'polynomial_features__degree': (1, 2), 
+                            'knn__n_neighbors': (3, 4, 5)}
+            buy_knn = knn_classifier(token, hyperparams)
+            train_df = make_criteria(train_df, buy_not_sell=True)
+            print('Fitting buy data.')
+            # knn.train(df, 'Buy Labels')
+            # buy_knn.optimize_parameters(train_df, 'Buy Labels')
+            
+            buy_knn.build_pipeline()    # Explicitly reset the model to an empty model
+            buy_knn.train(train_df, 'Buy Labels')
+            
+            train_df.drop(columns='Buy Labels', inplace=True)
+            df = buy_knn.build_feature(df, 'Buy')       # , ignore_names=['Buy Labels']
+            
+            print('Fitting sell data.')
+            train_df = make_criteria(train_df, buy_not_sell=False)
+            # knn.train(df, 'Sell Labels')
+            sell_knn = knn_classifier(token, hyperparams)
+            sell_knn.build_pipeline()
+            sell_knn.train(train_df, 'Sell Labels', ignore_names=['BTCknn Buy'])
+            df = sell_knn.build_feature(df, 'Sell', ignore_names=['Sell Labels', 'BTCknn Buy'])
+            train_df.drop(columns='Sell Labels', inplace=True)
 
         print('done.')
 
-        df_cols = test_df.columns
+        df_cols = df.columns
 
         # Strip out open high low close
         for market in markets:
@@ -337,4 +456,30 @@ def build_features(testing_df, markets, feature_dict, training_df=None):
                 if col in [token + 'Open', token + 'High', token + 'Low']:
                     df.drop(columns=[col], inplace = True)
 
-        return test_df
+        return df
+
+
+if __name__ == "__main__":
+    from environments.environments import SimulatedCryptoExchange
+
+    start = datetime(2020, 1, 11)
+    end = datetime.now()
+
+    features = {    # 'sign': ['Close', 'Volume'],
+        # 'EMA': [50, 80, 130],
+        'OBV': [],
+        'RSI': [],
+        'BollingerBands': [1, 3],
+        'BBInd': [],
+        'BBWidth': [],
+        'discrete_derivative': ['BBWidth3'],
+        # 'probability': ['BBInd3', 'BBWidth3'],
+        'rolling probability': ['BBInd3', 'BBWidth3']
+        # 'time of day': [],
+        # 'stack': [5]
+        }
+    
+    sim_env = SimulatedCryptoExchange(start, end, granularity=5, feature_dict=features, train_test_split=1/9)
+    df = sim_env.df.copy()
+
+

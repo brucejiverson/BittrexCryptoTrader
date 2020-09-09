@@ -17,7 +17,7 @@ class ExchangeEnvironment(object):
     between different classes (eg simulated vs real exchange), and to make it easy to change that
     architecture by having change be in a single place."""
 
-    def __init__(self, gran, feature_dict, train_data_amount=timedelta(days=60)):
+    def __init__(self, gran, feature_dict):
 
         #get my keys
         with open(f_paths['secret']) as secrets_file:
@@ -26,8 +26,8 @@ class ExchangeEnvironment(object):
 
         #Need both versions of the interface as they each provide certain useful functions
         # try:
-        self.bittrex_obj_1_1 = Bittrex('keys["key"]', keys["secret"], api_version=API_V1_1)
-        self.bittrex_obj_2 = Bittrex('keys["key"]', keys["secret"], api_version=API_V2_0)
+        self.bittrex_obj_1_1 = Bittrex(keys["key"], keys["secret"], api_version=API_V1_1)
+        self.bittrex_obj_2 = Bittrex(keys["key"], keys["secret"], api_version=API_V2_0)
         # except 
         self.markets = ['USD-BTC']#, 'USD-ETH', 'USD-LTC']    #Alphabetical
         self.n_asset = len(self.markets)
@@ -78,7 +78,6 @@ class ExchangeEnvironment(object):
         self.candle_df_1min = None
         self.candle_df = None
         self.df = None
-        self.train_df = None
         self.transformed_df = None
         self.asset_data = None
         self.should_log = False
@@ -200,9 +199,10 @@ class ExchangeEnvironment(object):
             df_1_min = df_1_min.append(cum_df, sort=True)
             print('binary file 1 min. gran. loaded... ', end='')
         except FileNotFoundError:
+            print('Could not find a binary 1 minute granularity file.')
             cum_df = fetch_csv()
             print(cum_df.head())
-            print('jhere')
+            # print('jhere')
             print('csv file 1 min. gran. loaded... ', end='')
         
         df_1_min = df_1_min.append(cum_df, sort=True)
@@ -234,7 +234,8 @@ class ExchangeEnvironment(object):
         # Change the granularity of the data
         gran_path = f_paths['cum data pickle']+str(gran)+'.pkl'
         try:
-            df_gran = df_gran.append(pd.read_pickle(gran_path), sort=True)
+            read_df_gran = pd.read_pickle(gran_path)
+            df_gran = df_gran.append(read_df_gran, sort=True)
             df_gran = self._format_df(df_gran)
             # find the full daterange of binary gran file
             data_end = df_gran.index[-1]
@@ -256,13 +257,6 @@ class ExchangeEnvironment(object):
         df_gran.to_pickle(gran_path)
 
         time_shift_from_bittrex = timedelta(hours=7)
-        # make a dataframe with the dates preceding the normal data frame for training data 
-        train_end =  start_date + time_shift_from_bittrex
-        train_start = train_end - timedelta(days=60)
-        
-        # train_df = df_gran.loc[(df_gran.index > start_date) & (df_gran.index < end_date)]       # This is the cheating one
-        train_df = df_gran.loc[(df_gran.index > train_start) & (df_gran.index <train_end)]      # this is the real one
-        self.train_df = train_df
 
         # Filter df_gran
         df_gran = df_gran.loc[df_gran.index > start_date + time_shift_from_bittrex]

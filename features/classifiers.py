@@ -1,11 +1,20 @@
-import numpy as np
+
+# Importing from other modules in the package
 from features.predictor import Predictor
+from features.label_data import *
 from tools.tools import f_paths, percent_change_column
+
+# Miscellaneous
 from datetime import datetime, timedelta
 import argparse
 import matplotlib.pyplot as plt
+
+# Data handling
 import pickle
 import pandas as pd
+import numpy as np
+
+# sklearn stuff
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.neural_network import MLPClassifier
@@ -21,24 +30,28 @@ class knn_classifier(Predictor):
     percentage change, not simple time differencing, as it makes the threshold more intuitive. 
     (temporarily changed as it was causing problems)"""
 
-    def __init__(self, token, hyperparams, label_type = 'standard', n_predictions=1):
-        super().__init__(hyperparams, n_predictions)
+    def __init__(self, token, hyperparams, label_type='standard'):
+        super().__init__(hyperparams)
         self.name = 'knn'
         self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
         self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
         print(f"Hyperparams: {hyperparams}")
+        self.model = None
+        self.build_pipeline()
 
+
+    def build_pipeline(self):
         scaler = StandardScaler()
-        degree = hyperparams['polynomial_features__degree'][0]
+        degree = self.hyperparams['polynomial_features__degree'][0]
         polynomial_features = PolynomialFeatures(degree=degree)
 
-        k = hyperparams['knn__n_neighbors'][0]
+        k = self.hyperparams['knn__n_neighbors'][0]
         knn = KNeighborsClassifier(n_neighbors=k)
 
         # The pipeline can be used as any other estimator
         # and avoids leaking the test set into the train set
         self.model = Pipeline([
-                        # ('scaler', scaler),
+                        ('scaler', scaler),
                         ('polynomial_features', polynomial_features),
                         ('knn', knn)])
 
@@ -69,8 +82,8 @@ class logistic_regression_classifier(Predictor):
     dictionary, parameters are k, polynomial degrees. Note that this calculates 
     percentage change, not simple time differencing, as it makes the threshold more intuitive."""
 
-    def __init__(self, token, hyperparams, label_type = 'standard', n_predictions=1):
-        super().__init__(hyperparams, n_predictions)
+    def __init__(self, token, hyperparams, label_type = 'standard'):
+        super().__init__(hyperparams)
         self.name = 'logistic regression'
         self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
         self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
@@ -117,8 +130,8 @@ class mlp_classifier(Predictor):
     percentage change, not simple time differencing, as it makes the threshold more intuitive. 
     (temporarily changed as it was causing problems)"""
 
-    def __init__(self, token, hyperparams, n_predictions=1):
-        super().__init__(hyperparams, n_predictions)
+    def __init__(self, token, hyperparams):
+        super().__init__(hyperparams)
         self.name = 'mlp'
         self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
         self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
@@ -144,8 +157,8 @@ class svc_classifier(Predictor):
     percentage change, not simple time differencing, as it makes the threshold more intuitive. 
     (temporarily changed as it was causing problems)"""
 
-    def __init__(self, token, hyperparams, n_predictions=1):
-        super().__init__(hyperparams, n_predictions)
+    def __init__(self, token, hyperparams):
+        super().__init__(hyperparams)
         self.name = 'svc'
         self.path = f_paths['feature_models'] + '/' + self.name + '.pkl'
         self.config_path = f_paths['feature_models'] + '/' + self.name + '_config.pkl'
@@ -175,37 +188,56 @@ if __name__ == '__main__':
     from environments.environments import SimulatedCryptoExchange
     #date range to train on
     start = datetime(2020, 1, 1)
-    end = datetime.now() #- timedelta(days = 1)
+    end = datetime(2020, 9, 1) #- timedelta(days = 1)
     features = {  # 'sign': ['Close', 'Volume'],
-        # 'EMA': [],
+        # 'EMA': [50, 80, 130],
         'OBV': [],
         'RSI': [],
         # 'high': [],
         # 'low': [],
-        'BollingerBands': [3, 4, 5],
+        'BollingerBands': [3],
         'BBInd': [],
         'BBWidth': [],
-        'discrete_derivative': ['BBWidth3', 'BBWidth4', 'BBWidth5'],
+        'discrete_derivative': ['BBWidth3'], #, 'BBWidth4', 'BBWidth5'],
         # 'time of day': [],
-        'stack': [2]
+        # 'stack': [2],
+        'rolling probability': ['BBInd3', 'BBWidth3']
+        # 'probability': ['BBInd3', 'BBWidth3']
         }
-    sim_env = SimulatedCryptoExchange(granularity=5, feature_dict=features)
+    sim_env = SimulatedCryptoExchange(granularity=5, feature_dict=features, train_test_split=1/16)
 
     df = sim_env.df.copy()              # This is the dataframe with all of the features built.
 
     token = 'BTC'
     if name == 'knn':
         # Hyperparameters
-        hyperparams = {'polynomial_features__degree': (1, 2, 3), 
-                        'knn__n_neighbors': (3, 4, 5, 6, 7)}
-        knn = knn_classifier(token, hyperparams, n_predictions=5)
+        hyperparams = {'polynomial_features__degree': (1, 2), 
+                        'knn__n_neighbors': (3, 4)}
+        buy_knn = knn_classifier(token, hyperparams)
+        df = make_criteria(df, buy_not_sell=True)
+        # print('DF WITH BUY LABELS:')
+        # print(df.head())
+        print('Fitting buy data.')
+        buy_knn.optimize_parameters(df, 'Buy Labels')
+        df = buy_knn.build_feature(df, 'Buy', ignore_names=['Buy Labels'])
+        print('Refitting on full dataset with buy knn.')
+        buy_knn.build_pipeline()    # Explicitly reset the model to an empty model
+        buy_knn.train(df, 'Buy Labels')
+        df.drop(columns='Buy Labels', inplace=True)
+        
+        print('Fitting sell data.')
+        df = make_criteria(df, buy_not_sell=False)
+        sell_knn = knn_classifier(token, hyperparams)
+        sell_knn.optimize_parameters(df, 'Sell Labels', ignore_names=['BTCknnknn Buy'])
+        df = sell_knn.build_feature(df, 'Sell', ignore_names=['Sell Labels', 'BTCknnknn Buy'])
+        print('Refitting on full dataset with sell knn.')
+        sell_knn.build_pipeline()
+        sell_knn.train(df, 'Sell Labels')
+        df.drop(columns='Sell Labels', inplace=True)
+
         # knn.load()
-        knn.optimize_parameters(df)
-        # knn.train(df)
-        df = knn.build_feature(df)
-        # df, new_name = percent_change_column('BTCClose', df, -1)
-        print(df.head(100))
-        knn.save()
+        print(df.head())
+        # knn.save()
     elif name == 'reg':
         # Hyperparameters
         hyperparams = {'polynomial_features__degree': (1, 2, 3),

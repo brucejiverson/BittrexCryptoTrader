@@ -15,6 +15,8 @@ class scorer:
         self.roi = None
         self.sharpe = None
         self.custom_score = None
+        self.alpha = None
+        self.beta = None
         self.calculate_scores(history)
         self.trade_analysis(history)
 
@@ -22,6 +24,8 @@ class scorer:
     def print_scores(self):
         print(f'Return on investment: {round(self.roi, 2)}')
         print(f'Sharpe ratio:         {round(self.sharpe, 2)}')
+        # print(f'Alpha:                {round(self.alpha, 2)}')
+        # print(f'Beta:                 {round(self.beta, 2)}')
         print(f'Custom score:         {round(self.custom_score, 2)}')
         
         
@@ -30,6 +34,9 @@ class scorer:
         self.roi = ROI(df['Total Value'].iloc[0], df['Total Value'].iloc[-1])
         self.sharpe = self.roi/df['Total Value'].std()
 
+        # asset_change = (df['BTCClose'].iloc[-1] - df['BTCClose'].iloc[0])/df['BTCClose'].iloc[0]
+        # self.alpha = self.roi - asset_change
+        # self.beta = 
         df = percent_change_column('Total Value', df)
         df = df[~df.isin([np.nan, np.inf, -np.inf]).any(1)]
         col = df['Total Value'].values
@@ -325,35 +332,37 @@ class knnAgent(Agent):
         self.last_action = 0
         
         self.price_at_prediction = None
-        self.states = ('Waiting for prediction',
-                        'Holding')
+        self.states = ('Waiting for buy',
+                        'Waiting for sell')
 
     def act(self, state):
 
         i = self.feature_map['BTCClose']
         cur_price = state[i]
-        i = self.feature_map['BTCknn']
-        knn = state[i]      # Should be 0 or 1
+        i = self.feature_map['BTCknn Buy']
+        buy_knn = state[i]      # Should be 0 or 1
         
-        if knn == 1:
+        i = self.feature_map['BTCknn Sell']
+        sell_knn = state[i]      # Should be 0 or 1
+        
+        if buy_knn == 1 and sell_knn != 1:    # and sell_knn == 0
             # Positive prediction of what is about to happen
             action = 1
-            self.price_at_prediction = cur_price
-            self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
+            # self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
             self.transition_states()
-        elif (cur_price - self.price_at_prediction)/self.price_at_prediction >= 0.15:
-            # sell for a profit
+        elif  sell_knn == 1:  # buy_knn == 0 and
+            # Positive prediction of what is about to happen
             action = 0
-            self.reset_trade_conditions()
             self.transition_states()
+    
         else: action = self.last_action
 
         # handle stop loss and others for loss management
-        result = self.check_set_trade_conditions(cur_price)
-        if result == -1:    # Sell
-            self.transition_states()    # moves to waiting for buy signal
-            action = 0
-            self.reset_trade_conditions()
+        # result = self.check_set_trade_conditions(cur_price)
+        # if result == -1:    # Sell
+        #     self.transition_states()    # moves to waiting for buy signal
+        #     action = 0
+        #     self.reset_trade_conditions()
         self.last_action = action
         return action
 
@@ -493,7 +502,7 @@ class biteBack(Agent):
 class probabilityAgent(Agent):
     """This agent uses a feature built on probability analysis"""
     # Default hyperparams
-    h = {}
+    h = {'buy thresh': 0.65, 'sell thresh': 0.65, 'stop loss': None}
     def __init__(self, feature_map, action_size, hyperparams = h):
         super().__init__('probability agent', feature_map, action_size)
 
@@ -501,12 +510,13 @@ class probabilityAgent(Agent):
         self.reset_trade_conditions()
 
         self.periods_since_buy = 0
-        self.certainty_thresh = 0.55
-        
+        self.buy_certainty_thresh = hyperparams['buy thresh']
+        self.sell_certainty_thresh = hyperparams['sell thresh']
+
         self.hyperparams = hyperparams
         # self.trailing_stop_order['percent'] = self.hyperparams['order']
         self.states = ('waiting for buy signal', 
-                        'waiting to sell')
+                        'waiting for sell signal')
         self.state_index = 0
         self.cur_state = self.states[self.state_index]
 
@@ -525,39 +535,41 @@ class probabilityAgent(Agent):
         # Rules for transitioning states
         # Note that states also change when a trade is triggered
         if self.cur_state == 'waiting for buy signal':
-            if buy_given_x >= self.certainty_thresh:
+            if buy_given_x >= self.buy_certainty_thresh:
                 self.reset_trade_conditions()
                 action = 1
-                # self.stop_loss = cur_price*1.001
+                if not self.hyperparams['stop loss'] is None:
+                    self.stop_loss = cur_price*self.hyperparams['stop loss']
                 # self.trailing_stop_loss['percent'] = .5
                 self.transition_states()
             
             else: action = self.last_action
 
-        elif self.cur_state == 'waiting to sell':
-            if sell_given_x >= self.certainty_thresh:
+        elif self.cur_state == 'waiting for sell signal':
+            if sell_given_x >= self.sell_certainty_thresh:
                 # sell immediately
                 self.reset_trade_conditions()
                 action = 0
                 self.transition_states()
             else: action = self.last_action
+        else:   # should never end up here
+            raise ValueError
 
         result = self.check_set_trade_conditions(cur_price)
         if result == -1:    # Sell
             self.transition_states()    # moves to waiting for buy signal
             action = 0
             self.reset_trade_conditions()
-        # elif result == 1:   # Buy
-        #     self.transition_states()    # moves to trailing stop loss
-        #     self.reset_trade_conditions()
-        #     self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
-        #     action = 1
+        elif result == 1:   # Buy
+            self.transition_states()    # moves to trailing stop loss
+            self.reset_trade_conditions()
+            # self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
+            action = 1
         # else: action = self.last_action
         # print(f'stop loss {self.trailing_stop_loss}')
         # print(f'stop order {self.trailing_stop_order}')
         self.last_action = action
         return action
-
 
 
 class simpleBiteBack(Agent):

@@ -1,5 +1,4 @@
 # from bittrex.bittrex import *
-# from feature-construction.feature_constructors import *
 import mplfinance as mpf
 import plotly.graph_objects as go
 
@@ -36,8 +35,9 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
     """
 
     def __init__(self, 
-                start = datetime.now() - timedelta(days = 9), 
+                start = datetime.now() - timedelta(days = 30), 
                 end = datetime.now(),
+                train_amount=30,
                 initial_investment=100,
                 granularity=1,   # in minutes
                 feature_dict=None):
@@ -52,9 +52,12 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         print("PRICE HISTORY DATA: ")
         print(self.candle_df.head())
         print(self.candle_df.tail())
+
         #Convention here is string key, list of hyperparams typically for multiple of the feature type
                        # This is how many of the previous states to include
-        self.df = build_features(self.candle_df, self.markets, feature_dict, self.train_df) # This fills in the asset_data array
+        
+        
+        self.df = build_features(self.candle_df, self.markets, feature_dict, train_amount=train_amount) # This fills in the asset_data array
         self.asset_data = self.df.values
         print('PREPARED DATA:')
         print(self.df.head())
@@ -65,7 +68,6 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         # instance attributes
         self.initial_investment = initial_investment
         self.mean_spread = .00003 #fraction of the price to use as spread when placing limit orders
-
         self.cur_step = None
 
         self.reset()
@@ -226,9 +228,11 @@ class BittrexExchange(ExchangeEnvironment):
     Bittrex, and uses a similar 'act' method to interface with agents."""
 
     def __init__(self, 
-                granularity=1,      # in minutes
+                train_amount=30,   # in days
+                granularity=5,      # in minutes
                 feature_dict=None,
-                money_to_use=10,
+                money_to_use=20,
+                window_size=30,
                 verbose=1):         # from 0 (no messages) to 3 (lots of messages)
 
         super().__init__(granularity, feature_dict)
@@ -240,27 +244,27 @@ class BittrexExchange(ExchangeEnvironment):
         self.initial_investment = money_to_use
         self.feature_dict = feature_dict
         self.asset_volumes = None
-
-        # self.state, self.cur_val = self.reset()
-        if self.verbose >= 1:
-            self.print_account_health()
-
+        self.window_size = window_size
+        
 
     def reset(self):
         # Resets the environement to the initial state
+        print('Resetting the environment object')
         end = datetime.now()
-        start = end - timedelta(days = 1)
+        start = end - timedelta(self.window_size)
 
         self._fetch_candle_data(start, end)
         print('CANDLE DATA:')
         print(self.candle_df.tail())
-        self.df = build_features(self.candle_df, self.markets, self.feature_dict) # This fills in the asset_data array
+        self.df = build_features(self.candle_df, self.markets, self.feature_dict, train_amount=0) # This fills in the asset_data array
         self.asset_data = self.df.values
         print('PREPARED DATA:')
         print(self.df.tail())
 
         self.cancel_all_orders()
         self.get_all_balances()
+        if self.verbose >= 1:
+            self.print_account_health()
 
         # #Put all money into USD
         # if self.assets_owned[0] > 0:
@@ -273,10 +277,10 @@ class BittrexExchange(ExchangeEnvironment):
 
     def update(self):
         end = datetime.now()
-        start = datetime.now() - timedelta(hours = 6)
+        start = datetime.now() - timedelta(days=self.window_size)
 
         self._fetch_candle_data(start, end)
-        self.df = build_features(self.candle_df, self.markets, self.feature_dict) # This fills in the asset_data array
+        self.df = build_features(self.candle_df, self.markets, self.feature_dict, train_amount=0) # This fills in the asset_data array
         self.asset_data = self.df.values
         self.get_all_balances()
     
@@ -467,9 +471,11 @@ class BittrexExchange(ExchangeEnvironment):
                         self.assets_owned[i] = 0
                     else: self.assets_owned[i] = amount
                     break
+                else:
+                    print('Error fetching balances.')
+                    print(balance_response)
 
                 attempts_left -= 1
-
         #Get USD
         attempts_left = 3
         while attempts_left >= 0:
@@ -483,7 +489,9 @@ class BittrexExchange(ExchangeEnvironment):
                 else: #Balance is 0
                     self.USD = amount
                 break
-
+            else:
+                print('Error fetching balances.')
+                print(balance_response)
             attempts_left -= 1
 
 
@@ -494,9 +502,18 @@ class BittrexExchange(ExchangeEnvironment):
         self.get_all_balances()
         self._get_current_prices()
 
-        index = ['USD', *[x[4:7] for x in self.markets]]
-        dict = {'Amount of currency': [round(self.USD, 2), *self.assets_owned], 'Value in USD':  [round(self.USD, 2), *self.assets_owned*self.asset_prices]}
-
+        index = ['USD', *[x[4:7] for x in self.markets]]\
+        
+        try:
+            dict = {'Amount of currency': [round(self.USD, 2), *self.assets_owned], 'Value in USD':  [round(self.USD, 2), *self.assets_owned*self.asset_prices]}
+        except TypeError:
+            print('Some value was not initialized:')
+            print(f'USD          {self.USD}')
+            print(f'Assets owned {self.assets_owned}')
+            print(f'Asset prices {self.asset_prices}')
+            raise(TypeError)
+            # print(f'USD {self.USD}')
+            # print(f'USD {self.USD}')
         df = pd.DataFrame(dict, index = index)
 
         print('\nCURRENT ACCOUNT INFO:')
@@ -523,7 +540,7 @@ class BittrexExchange(ExchangeEnvironment):
 
         else:
             print('Failed to get order history.')
-            print(result)
+            print(open_orders)
 
 
     def _trade(self, currency_pair, amount):
