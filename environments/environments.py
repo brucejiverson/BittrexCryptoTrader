@@ -372,10 +372,10 @@ class BittrexExchange(ExchangeEnvironment):
 
         btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
         cur_val = btc_amt + self.USD
-        new_info = {'$ of BTC':btc_amt, 
-                    'Total Value':cur_val,
-                    'Action': action,
-                    'Timestamp':self.df.iloc[-1].name}
+        new_info = {'$ of BTC':[btc_amt], 
+                    'Total Value':[cur_val],
+                    'Action': [action],
+                    'Timestamp':[self.df.iloc[-1].name]}
         self.log.update(new_info)
         if self.verbose >= 2:
             print('Log has been updated.')

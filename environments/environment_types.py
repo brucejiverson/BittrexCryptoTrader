@@ -1,4 +1,4 @@
-from tools.tools import f_paths
+from tools.tools import f_paths, maybe_make_dir
 from bittrex.bittrex import *
 from tools.tools import ROI, printProgressBar, percent_change_column
 import itertools
@@ -436,37 +436,46 @@ class ExchangeEnvironment(object):
 class AccountLog:
     
     def __init__(self):
-        log_columns = ['$ of BTC', 'Total Value']
+        log_columns = ['$ of BTC', 'Total Value', 'Actions', 'Timestamp']
         # self.data = pd.DataFrame(columns=log_columns)
-        self.data = []  # np.empty([0,0])
-        self.df = None
+        # self.data = []  # np.empty([0,0])
+        self.df = pd.DataFrame(columns=log_columns)
 
 
     def update(self, info):
-        self.data.append(list(info.values()))   # Append to numpy array
-    
+        # self.data.append(list(info.values()))   # Append to numpy array
+        row = pd.DataFrame(info)
+        # row.index= row['Timestamp']
+        # print(row)
+        # print(info)
+        # print(type(info))
+        # row = pd.DataFrame(columns=log_columns, data=list(info.values()))
+        self.df = self.df.append(row, sort=True)
 
-    def to_dataframe(self):
-        log_columns = ['$ of BTC', 'Total Value', 'Actions', 'Timestamp']
-        df = pd.DataFrame(columns=log_columns, data=self.data)
-        df.set_index('Timestamp', inplace=True, drop=True)
-        self.df = df
-
+    # def to_dataframe(self):
+    #     log_columns = ['$ of BTC', 'Total Value', 'Actions', 'Timestamp']
+    #     df = pd.DataFrame(columns=log_columns, data=self.data)
+    #     df.set_index('Timestamp', inplace=True, drop=True)
+    #     self.df = df
 
     def save(self):
         """This method append to the log to the binary file.
         Saves to the live log. Sim logging saves are not currently supported"""
 
         path = f_paths['live log']
-        self.to_dataframe()
-        df = self.df
+        # df = self.df.copy()
         try:
             df = pd.read_pickle(path)
-            df = df.append(self.data, sort = True)
+            df = df.append(self.df, sort = True)
+            df = df[~df.index.duplicated()]
         except pd.errors.EmptyDataError:
             print('There was no data in the log. Saving data generated during this run... ', end = ' ')
             maybe_make_dir(path[:-21])
-            df = self.data
+            df = self.df.copy()
+        except FileNotFoundError:
+            print('No live log file found. Creating the file...', end='')
+            maybe_make_dir(path[:-21])
+            df = self.df.copy()
         df.to_pickle(path)
         print('done.')
 
@@ -474,8 +483,6 @@ class AccountLog:
     def plot(self, df, name=''):
         """This method plots performance of an agent over time.
         """
-        self.to_dataframe()
-
         # Get the buys and the sells
         history = self.df.copy()
         history['delta'] = history['Actions'] - history['Actions'].shift(1)  # Converts the column to % change
@@ -498,7 +505,7 @@ class AccountLog:
 
         market_perf = ROI(df[token + 'Close'].iloc[0], df[token + 'Close'].iloc[-1])
         # fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
-        df.plot(y=token +'Close', ax=ax1)
+        df.reset_index().plot(x='Timestamp', y=token +'Close', ax=ax1)
         
         buys.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='^', c='g', zorder=4)
         sells.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='v', c='r', zorder=4)
