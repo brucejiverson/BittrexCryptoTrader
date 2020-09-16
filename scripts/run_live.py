@@ -21,22 +21,22 @@ def roundTime(dt=None, roundTo=60):
  # Leave this intact when running consecutive backtests and switching between modes
 features = {  # 'sign': ['Close', 'Volume'],
         # 'EMA': [50, 80, 130],
-        'OBV': [],
-        'RSI': [],
+        # 'OBV': [],
+        # 'RSI': [],
         # 'high': [],
         # 'low': [],
-        'BollingerBands': [3],
+        'BollingerBands': [4],
         'BBInd': [],
         'BBWidth': [],
-        'discrete_derivative': ['BBWidth3'],
+        'discrete_derivative': ['BBWidth4'],
         # 'time of day': [],
         # 'stack': [2],
         # 'rolling probability': ['BBInd3', 'BBWidth3']
-        'probability': ['BBInd3', 'BBWidth3']
+        'probability': ['BBInd4', 'BBWidth4']
         # 'knn':[],
         }
 
-env = BittrexExchange(granularity=5, feature_dict=features, window_size=25, verbose=3)
+env = BittrexExchange(granularity=1, feature_dict=features, window_size=15, verbose=3)
 state = env.reset()
 
 feature_list = env.df.columns
@@ -52,9 +52,9 @@ hyperparams = {'ind base': 15,
                 'order': 3,                      # these are percentages for trailing orders
                 'loss': 0,
                 'stop loss': 6}
-hyperparams = {'buy thresh': .55,
-                'sell thresh': .5,
-                'stop loss': .98}
+hyperparams = {'buy thresh': .5,
+                'sell thresh': .42,
+                'stop loss': None}
 
 # agent = biteBack(feature_map, action_size, hyperparams)
 agent = probabilityAgent(feature_map, action_size, hyperparams)
@@ -73,22 +73,29 @@ if agent.name == 'dqn':
 print('\n Oohh wee, here I go trading again! \n')
 
 start_time = datetime.now()
-loop_frequency = 60*env.granularity/2 #seconds
+loop_frequency = 60*env.granularity #seconds
+# The next time to run at (rounded to nearest minute)
+run_time = roundTime(datetime.now() + timedelta(hours=7))   # To the nearest minute
 
 while True: # datetime.now() < start_time + timedelta(hours = .5):
-    loop_start = datetime.now()
-    bittrex_time = roundTime(datetime.now() + timedelta(hours=7))
+    now = datetime.now() + timedelta(hours=7)
 
-    # print(f'It is now {bittrex_time} on the Bittrex Servers.')
-    state = env.update() #This fetches data and preapres it, and also gets
+    # print(f'It is now {run_time} on the Bittrex Servers.')
+    if now >= run_time:
+        state = env.update() #This fetches data and preapres it, and also gets
+        
+        action = agent.act(state)
+        env.act(action)
+        env.log.save()
+        # The next time to run at (rounded to nearest minute)
+        run_time += timedelta(seconds= loop_frequency)   # To the nearest minute
     
-    action = agent.act(state)
-    env.act(action)
-    env.log.save()
-
-    # use async instead?
-    # or just fix to run right after the candle gets made (15 seconds?)
-    sleep_time = (timedelta(seconds = loop_frequency) - (datetime.now() - loop_start)).seconds #in seconds
-    if sleep_time > 1 and sleep_time < loop_frequency - 5:
+    delta_time = run_time - (now)
+    sleep_time =  delta_time.seconds            # in seconds
+    # print(f'Run time:   {run_time}')
+    # print(f'Now:        {now}')
+    # print(f'Deltatime:  {delta_time}')
+    # print(f'Sleep time: {sleep_time}')
+    if delta_time > timedelta(seconds=0):
         print(f'Sleeping for {sleep_time} seconds.')
         time.sleep(sleep_time)

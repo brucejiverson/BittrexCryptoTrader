@@ -49,7 +49,7 @@ class statisticsBoy():
         self.kernels['x given sell'] = x_given_sell_kernel
 
 
-    def build_feature(self, input_df, names, thresh=.5):
+    def build_feature(self, input_df, names):
         # For now, not doing train/test split, but this function should do that, use cross validation, and then rebuild all. I think
         df = input_df.copy()
         

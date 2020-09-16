@@ -38,18 +38,19 @@ def play_one_episode(agent, env, is_train):
     return val
 
 
-def test(features, granularity=5):
+def test(features, granularity=1):
     # end = datetime(year=2020, month=7, day=8)
     # start = end - timedelta(hours = 1, days = 1, weeks=4)
 
-    start = datetime(year=2020, month=5, day=1)
-    end = datetime(year=2020, month=9, day=30)
+    start = datetime(year=2020, month=8, day=25)
+    end = datetime(year=2020, month=9, day=17)
     print(f'Backtesting from {start} to {end}.')
     initial_investment = 100
     print(features)
-    sim_env = SimulatedCryptoExchange(start, end, granularity=granularity, feature_dict=features, train_amount=20)
-    print('done building')
-    print(sim_env.df.iloc[0:50])
+    # train amount is in days
+    sim_env = SimulatedCryptoExchange(start, end, granularity=granularity, feature_dict=features, train_amount=10)
+    # print('done building')
+    # print(sim_env.df.iloc[0:50])
     # print(sim_end.df.head())
     # Build a mapping of features so that the agent knows what each value in the state means what
     feature_list = sim_env.df.columns
@@ -69,7 +70,9 @@ def test(features, granularity=5):
     # hyperparams = {'stop loss':[None]}
 
     agents = [
-            probabilityAgent(feature_map, action_size, {'buy thresh':.55, 'sell thresh': 0.5, 'stop loss': .98})
+            probabilityAgent(feature_map, action_size, {'buy thresh':.5, 'sell thresh': 0.4, 'stop loss': None}),
+            
+            ratioProbabilityAgent(feature_map, action_size, {'buy thresh':.65, 'sell thresh': -.6, 'stop loss': .985})
             # biteBack(feature_map, action_size, hyperparams),
             # simpleBiteBack(feature_map, action_size, hyperparams),
             # knnAgent(feature_map, action_size),
@@ -144,19 +147,19 @@ def grid_search(features):
 
     # for probability
     parameters = {
-                'agent': {'buy thresh': [.5, .55, .6, .65, .7],
-                        'sell thresh': [.4, .45, .5, .55, .6],
-                        'stop loss': [.97, .985, .995, .99, None]}
+                'agent': {'buy thresh': [.5, .55, .6, .65],
+                        'sell thresh': [.4, .5],
+                        'stop loss': [.995, .999, None]}
     }
     
-    start = datetime(year=2019, month=4, day=1)
-    end = datetime(year=2020, month=4, day=30)
+    start = datetime(year=2020, month=8, day=25)
+    end = datetime(year=2020, month=9, day=14)
 
     print(f'Backtesting from {start} to {end}.')
     initial_investment = 100
 
 
-    sim_env = SimulatedCryptoExchange(start, end, granularity=5, feature_dict=features, train_amount=20)
+    sim_env = SimulatedCryptoExchange(start, end, granularity=1, feature_dict=features, train_amount=10)
     sim_env.should_log = True
     feature_list = sim_env.df.columns
     feature_map = {}
@@ -312,15 +315,16 @@ if __name__ == '__main__':
         'RSI': [],
         # 'high': [],
         # 'low': [],
-        'BollingerBands': [3, 4, 5],
+        'BollingerBands': [2, 3, 4, 10],
         'BBInd': [],
         'BBWidth': [],
-        'discrete_derivative': ['BBWidth3', 'BBWidth4', 'BBWidth5'],
+        'discrete_derivative': ['BBWidth3', 'BBWidth4'],
         # 'time of day': [],
         # 'stack': [2],
-        'rolling probability': ['BBInd3', 'BBWidth3']
+        'rolling probability': ['BBInd4', 'BBWidth4'],
         # 'probability': ['BBInd3', 'BBWidth3']
         # 'knn':[],
+        # 'divide': ['Likelihood of buy given x', 'Likelihood of sell given x']
         }
 
     if mode == 'test':

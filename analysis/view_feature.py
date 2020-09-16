@@ -7,31 +7,36 @@ import matplotlib.pyplot as plt
 features_to_view = [
                     # 'bb_bbm1', 'bb_bbh1', 'bb_bbl1', 'bb_bbm5', 'bb_bbh5', 'bb_bbl5', # 'bb_bbm10', 'bb_bbh10', 'bb_bbl10', 
                     # 'bb_bbli', 'bb_bbhi', 
-                    'BBInd3', 'BBInd5', 'BBInd10',
+                    # 'BBInd4',# 'BBInd5', 'BBInd10',
                     
-                    'BBWidth3', 'BBWidth5', 'BBWidth10'
+                    # 'BBWidth4', #'BBWidth5', 'BBWidth10',
+                    'Likelihood of buy given x/Likelihood of sell given x',
                     # 'discrete_derivative': ['BBWidth3'],
                     # 'BTCOBV', 
                     # 'BTCRSI'
                     ] # This is the feature to visualize
                     
-start = datetime(2020, 6, 17)
-end = datetime(2020, 8, 24)
+start = datetime(2020, 8, 25)
+end = datetime(2020, 9, 16)
 
 last_time_scraped = datetime.now() - timedelta(days = .25)
 
 features = {    # 'sign': ['Close', 'Volume'],
     # 'EMA': [50, 80, 130],
-    'BollingerBands': [1, 3, 5, 10],
+    'BollingerBands': [4, 5, 10],
     'BBInd': [],
     'BBWidth': [],
-    'discrete_derivative': ['BBWidth3'],
-    'OBV': [],
-    'RSI': [],
-    'time of day': [],
+    # 'discrete_derivative': ['BBWidth4'],
+    # 'OBV': [],
+    # 'RSI': [],
+    # 'time of day': [],
+    'rolling probability': ['BBInd4', 'BBWidth4'],
+    # 'probability': ['BBInd3', 'BBWidth3']
+    # 'knn':[],
+    'divide': ['Likelihood of buy given x', 'Likelihood of sell given x']
     # 'stack': [1]
     }
-sim_env = SimulatedCryptoExchange(start, end, granularity=5, feature_dict=features)
+sim_env = SimulatedCryptoExchange(start, end, granularity=5, feature_dict=features, train_amount=14)
 
 df = sim_env.df.copy()
 df, new_name = percent_change_column('BTCClose', df, -1)
@@ -41,7 +46,8 @@ df = percent_change_column('BTCVolume', df, 1)
 
 # Look for small scale (0 - 1) features
 signal_features = []
-known_small_scale = ['BTCOBV', 'BTCRSI', 'BBInd1', 'BBInd5', 'BBInd10', 'BBWidth1', 'BBWidth3', 'BBWidth5', 'BBWidth10']
+known_small_scale = ['BTCOBV', 'BTCRSI', 'BBInd1', 'BBInd5', 'BBInd10', 'BBWidth1', 'BBWidth3', 'BBWidth5', 'BBWidth10',
+                    'Likelihood of buy given x/Likelihood of sell given x']
 for f in features_to_view:
     series = df[f]
     high, low = max(series), min(series)

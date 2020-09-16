@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 # symbols = ['BTCUSD', 'ETHUSD', 'LTCUSD'] #Example: 'BTCUSD'
 # markets = [sym[3:6] + '-' + sym[0:3] for sym in symbols]
 
-start = datetime(2020, 1, 1)
+start = datetime(2020, 7, 1)
 end = datetime.now()
 
 

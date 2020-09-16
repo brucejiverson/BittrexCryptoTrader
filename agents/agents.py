@@ -14,6 +14,7 @@ class scorer:
     def __init__(self, history):
         self.roi = None
         self.sharpe = None
+        self.annualized_sharpe = None
         self.custom_score = None
         self.alpha = None
         self.beta = None
@@ -22,18 +23,20 @@ class scorer:
 
 
     def print_scores(self):
-        print(f'Return on investment: {round(self.roi, 2)}')
-        print(f'Sharpe ratio:         {round(self.sharpe, 2)}')
-        # print(f'Alpha:                {round(self.alpha, 2)}')
-        # print(f'Beta:                 {round(self.beta, 2)}')
-        print(f'Custom score:         {round(self.custom_score, 2)}')
+        print(f'Return on investment:    {round(self.roi, 2)}')
+        print(f'Sharpe ratio:            {round(self.sharpe, 2)}')
+        print(f'Annulaized sharpe ratio: {round(self.annualized_sharpe, 2)}')
+        # print(f'Alpha:                  {round(self.alpha, 2)}')
+        # print(f'Beta:                   {round(self.beta, 2)}')
+        print(f'Custom score:            {round(self.custom_score, 2)}')
         
         
     def calculate_scores(self, history):
         df = history.copy()
         self.roi = ROI(df['Total Value'].iloc[0], df['Total Value'].iloc[-1])
         self.sharpe = self.roi/df['Total Value'].std()
-
+        gran = 5
+        self.annualized_sharpe = self.sharpe*(60*24*365/gran)**.5
         # asset_change = (df['BTCClose'].iloc[-1] - df['BTCClose'].iloc[0])/df['BTCClose'].iloc[0]
         # self.alpha = self.roi - asset_change
         # self.beta = 
@@ -519,6 +522,8 @@ class probabilityAgent(Agent):
                         'waiting for sell signal')
         self.state_index = 0
         self.cur_state = self.states[self.state_index]
+        self.min_hold_period = 1
+        self.hold_counter = 0
 
 
     def act(self, state):
@@ -535,7 +540,7 @@ class probabilityAgent(Agent):
         # Rules for transitioning states
         # Note that states also change when a trade is triggered
         if self.cur_state == 'waiting for buy signal':
-            if buy_given_x >= self.buy_certainty_thresh:
+            if buy_given_x >= self.buy_certainty_thresh and sell_given_x <= .4:
                 self.reset_trade_conditions()
                 action = 1
                 if not self.hyperparams['stop loss'] is None:
@@ -546,12 +551,102 @@ class probabilityAgent(Agent):
             else: action = self.last_action
 
         elif self.cur_state == 'waiting for sell signal':
-            if sell_given_x >= self.sell_certainty_thresh:
-                # sell immediately
+            if self.hold_counter >= self.min_hold_period:
+                if sell_given_x >= self.sell_certainty_thresh and buy_given_x <= .4:
+                    # sell immediately
+                    self.reset_trade_conditions()
+                    action = 0
+                    self.transition_states()
+                    self.hold_counter = 0
+                    
+                else: action = self.last_action
+            else:
+                self.hold_counter += 1
+                action = self.last_action
+        else:   # should never end up here
+            raise ValueError
+
+        result = self.check_set_trade_conditions(cur_price)
+        if result == -1:    # Sell
+            self.transition_states()    # moves to waiting for buy signal
+            action = 0
+            self.reset_trade_conditions()
+        elif result == 1:   # Buy
+            self.transition_states()    # moves to trailing stop loss
+            self.reset_trade_conditions()
+            # self.trailing_stop_loss['percent'] = self.hyperparams['stop loss']
+            action = 1
+        # else: action = self.last_action
+        # print(f'stop loss {self.trailing_stop_loss}')
+        # print(f'stop order {self.trailing_stop_order}')
+        self.last_action = action
+        return action
+
+
+
+class ratioProbabilityAgent(Agent):
+    """This agent uses a feature built on probability analysis"""
+    # Default hyperparams
+    h = {'buy thresh': .2, 'sell thresh': 0, 'stop loss': None}
+    def __init__(self, feature_map, action_size, hyperparams = h):
+        super().__init__('ratio probability agent', feature_map, action_size)
+
+        self.last_action = 0
+        self.reset_trade_conditions()
+
+        self.periods_since_buy = 0
+        self.buy_certainty_thresh = hyperparams['buy thresh']
+        self.sell_certainty_thresh = hyperparams['sell thresh']
+
+        self.hyperparams = hyperparams
+        # self.trailing_stop_order['percent'] = self.hyperparams['order']
+        self.states = ('waiting for buy signal', 
+                        'waiting for sell signal')
+        self.state_index = 0
+        self.cur_state = self.states[self.state_index]
+        self.min_hold_period = 1
+        self.hold_counter = 0
+
+
+    def act(self, state):
+
+        i = self.feature_map['BTCClose']
+        cur_price = state[i]
+
+        i = self.feature_map['Likelihood of buy given x']
+        buy_given_x = state[i]      # Should be 0 or 1
+        
+        i = self.feature_map['Likelihood of sell given x']
+        sell_given_x = state[i]      # Should be 0 or 1
+        
+        ratio = buy_given_x/sell_given_x - 1 
+
+        # Rules for transitioning states
+        # Note that states also change when a trade is triggered
+        if self.cur_state == 'waiting for buy signal':
+            if ratio >= self.buy_certainty_thresh and buy_given_x > .3:
                 self.reset_trade_conditions()
-                action = 0
+                action = 1
+                if not self.hyperparams['stop loss'] is None:
+                    self.stop_loss = cur_price*self.hyperparams['stop loss']
+                # self.trailing_stop_loss['percent'] = .5
                 self.transition_states()
+            
             else: action = self.last_action
+
+        elif self.cur_state == 'waiting for sell signal':
+            if self.hold_counter >= self.min_hold_period:
+                if ratio <= self.sell_certainty_thresh:
+                    # sell immediately
+                    self.reset_trade_conditions()
+                    action = 0
+                    self.transition_states()
+                    self.hold_counter = 0
+                    
+                else: action = self.last_action
+            else:
+                self.hold_counter += 1
+                action = self.last_action
         else:   # should never end up here
             raise ValueError
 

@@ -210,9 +210,9 @@ class ExchangeEnvironment(object):
         df_1_min.to_pickle(f_paths['cum data pickle'] + '1.pkl')
         print(' written to file.')
         self.candle_df_1min = df_1_min
-        print('1 MINUTE DATA:')
-        print(df_1_min.head())
-        print(df_1_min.tail())
+        # print('1 MINUTE DATA:')
+        # print(df_1_min.head())
+        # print(df_1_min.tail())
         
         assert(df_1_min.index.min() <= start_date)
 
@@ -272,16 +272,13 @@ class ExchangeEnvironment(object):
         # input_df = input_df[['Date', 'BTCClose']]
         formatted_df = df.copy()
         formatted_df = formatted_df.loc[~formatted_df.index.duplicated(keep = 'first')]     # this is intended to remove duplicates. ~ flips bits in the mask
-        # formatted_df = formatted_df[~formatted_df.isin([np.nan, np.inf, -np.inf]).any(1)]
-
-        # cols = formatted_df.columns # Started writing this cause it doesnt work for mulitple currencies
-        # bool_series = df['BTCClose'].notnull()
-        # formatted_df = formatted_df[bool_series.values]  # Remove non datapoints from the set
+        # Replacing infinite with nan 
+        formatted_df.replace([np.inf, -np.inf], np.nan, inplace=True) 
+        formatted_df.dropna(inplace=True)
 
         formatted_df.sort_index(inplace = True)
-        # formatted_df = input_df[['Date', 'BTCOpen', 'BTCHigh', 'BTCLow', 'BTCClose', 'BTCVolume']]  #Reorder
 
-        return formatted_df.dropna()
+        return formatted_df
 
 
     def _change_granularity(self, input_df):
@@ -438,32 +435,70 @@ class AccountLog:
     def __init__(self):
         log_columns = ['$ of BTC', 'Total Value', 'Actions', 'Timestamp']
         # self.data = pd.DataFrame(columns=log_columns)
-        # self.data = []  # np.empty([0,0])
-        self.df = pd.DataFrame(columns=log_columns)
+        self.data = np.empty((0,4))  # np.empty([0,0])
+        self.df = None
 
 
     def update(self, info):
         # self.data.append(list(info.values()))   # Append to numpy array
-        row = pd.DataFrame(info)
+        # print(info)
+        # print(info.values)
+        # print(list(info.values))
+        # arr = np.array(list(info.values))
+        self.data = np.vstack((self.data, np.array(info)))
+        # row = pd.DataFrame(info)
         # row.index= row['Timestamp']
         # print(row)
         # print(info)
         # print(type(info))
         # row = pd.DataFrame(columns=log_columns, data=list(info.values()))
-        self.df = self.df.append(row, sort=True)
+        # self.df = self.df.append(row, sort=True)
 
-    # def to_dataframe(self):
-    #     log_columns = ['$ of BTC', 'Total Value', 'Actions', 'Timestamp']
-    #     df = pd.DataFrame(columns=log_columns, data=self.data)
-    #     df.set_index('Timestamp', inplace=True, drop=True)
-    #     self.df = df
+
+    def to_dataframe(self):
+        log_columns = ['$ of BTC', 'Total Value', 'Actions', 'Timestamp']
+        # print(self.data)
+        # print(type(self.data))
+        if self.data.shape != 0:
+            df = pd.DataFrame(columns=log_columns, data=self.data)
+            # df.set_index('Timestamp', inplace=True, drop=True)
+            self.df = df
+        else: 
+            print("No data in the log, so cannot convert to dataframe")
+
+
+    def get_all_live_log(self):
+        path = f_paths['live log']
+        
+        self.to_dataframe()
+        if not self.df is None:
+            df = self.df.copy()
+        try:
+            df = pd.read_pickle(path)
+            df = df.append(self.df, sort = True)
+            df = df[~df.index.duplicated()]
+        except pd.errors.EmptyDataError:
+            print('There was no data in the log. Saving data generated during this run... ', end = ' ')
+            maybe_make_dir(path[:-21])
+            if not self.df is None:
+                df = self.df.copy()
+            else: return None
+        except FileNotFoundError:
+            print('No live log file found. Creating the file...', end='')
+            maybe_make_dir(path[:-21])
+            if not self.df is None:
+                df = self.df.copy()
+            else: return None
+        return df
+
 
     def save(self):
         """This method append to the log to the binary file.
         Saves to the live log. Sim logging saves are not currently supported"""
 
         path = f_paths['live log']
-        # df = self.df.copy()
+        self.to_dataframe()
+        df = self.df.copy()
         try:
             df = pd.read_pickle(path)
             df = df.append(self.df, sort = True)
@@ -476,6 +511,8 @@ class AccountLog:
             print('No live log file found. Creating the file...', end='')
             maybe_make_dir(path[:-21])
             df = self.df.copy()
+        
+        df = df[~df.index.duplicated()]
         df.to_pickle(path)
         print('done.')
 
@@ -484,18 +521,22 @@ class AccountLog:
         """This method plots performance of an agent over time.
         """
         # Get the buys and the sells
+        self.to_dataframe()
         history = self.df.copy()
         history['delta'] = history['Actions'] - history['Actions'].shift(1)  # Converts the column to % change
         history['delta'].fillna(0)
 
         history = percent_change_column('Total Value', history)
+        history.set_index('Timestamp', inplace=True)
         history['BTCClose'] = df['BTCClose']
         
-        buys = history[history['delta'] > 0]
-        sells = history[history['delta'] < 0]
+        buys = history[history.shift(-1)['delta'] > 0].copy()
+        sells = history[history.shift(-1)['delta'] < 0].copy()
         
-        print(f'Number of buys: {buys.shape[0]}.')
-        print(f'Number of sells: {sells.shape[0]}.')
+        n_buys = buys.shape[0]
+        n_sells = sells.shape[0]
+        print(f'Number of buys: {n_buys}.')
+        print(f'Number of sells: {n_sells}.')
 
         assert not df.empty
         # fig, ax2 = plt.subplots(1, 1)
@@ -505,12 +546,23 @@ class AccountLog:
 
         market_perf = ROI(df[token + 'Close'].iloc[0], df[token + 'Close'].iloc[-1])
         # fig.suptitle(f'Market performance: {market_perf}%', fontsize=14, fontweight='bold')
-        df.reset_index().plot(x='Timestamp', y=token +'Close', ax=ax1)
         
-        buys.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='^', c='g', zorder=4)
-        sells.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='v', c='r', zorder=4)
+        df.plot( y=token +'Close', ax=ax1)
+        # df.plot(y='bb_bbl4', ax=ax1)
+        # df.plot(y='bb_bbm4', ax=ax1)
+        # df.plot(y='bb_bbh4', ax=ax1)
+        
+        # df.plot(y='bb_bbl10', ax=ax1)
+        # df.plot(y='bb_bbm10', ax=ax1)
+        # df.plot(y='bb_bbh10', ax=ax1)
+        if n_buys != 0:
+            buys.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='^', c='g', zorder=4)
+        if n_sells != 0:
+            sells.reset_index().plot(y = 'BTCClose', x='Timestamp', ax=ax1, kind='scatter', marker='v', c='r', zorder=4)
         fig.autofmt_xdate()
         fig.suptitle(f'Performance for agent name: {name}', fontsize=14, fontweight='bold')
+        # print(self.df)
+
         self.df.reset_index().plot(x='Timestamp', y='Total Value', ax=ax2)
         # self.df.reset_index().plot(x='Timestamp',y='$ of BTC', ax = ax3)            # !!! not formatted to work with multiple coins
         # df.plot(y='BBInd5', ax=ax4)

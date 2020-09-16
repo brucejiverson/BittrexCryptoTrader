@@ -2,7 +2,7 @@
 import mplfinance as mpf
 import plotly.graph_objects as go
 
-from features.feature_constructor import build_features
+from features.feature_constructor import featuresHandler
 from tools.tools import f_paths, maybe_make_dir, printProgressBar, ROI
 from environments.environment_types import ExchangeEnvironment, AccountLog
 import pandas as pd
@@ -54,10 +54,13 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         print(self.candle_df.tail())
 
         #Convention here is string key, list of hyperparams typically for multiple of the feature type
-                       # This is how many of the previous states to include
+        # This is how many of the previous states to include
         
-        
-        self.df = build_features(self.candle_df, self.markets, feature_dict, train_amount=train_amount) # This fills in the asset_data array
+        self.featuresHandler = featuresHandler(feature_dict=feature_dict) # This fills in the asset_data array
+        self.df = self.featuresHandler.build_basic_features(self.candle_df, self.markets)
+        test_df, train_df = self.featuresHandler.train_predictors(self.df, self.markets, train_amount=train_amount)
+        self.df = test_df.copy()
+
         self.asset_data = self.df.values
         print('PREPARED DATA:')
         print(self.df.head())
@@ -119,7 +122,8 @@ class SimulatedCryptoExchange(ExchangeEnvironment):
         btc_amt = self.assets_owned[0]*self.asset_prices[0]
 
         if self.should_log:
-            new_info = {'$ of BTC':btc_amt, 'Total Value':cur_val, 'Action':action, 'Timestamp':self.df.iloc[self.cur_step].name}
+            # new_info = {'$ of BTC':btc_amt, 'Total Value':cur_val, 'Action':action, 'Timestamp':self.df.iloc[self.cur_step].name}
+            new_info = [btc_amt, cur_val, action, self.df.iloc[self.cur_step].name]
             self.log.update(new_info)
 
         def log_ROI(initial, final):
@@ -246,6 +250,8 @@ class BittrexExchange(ExchangeEnvironment):
         self.asset_volumes = None
         self.window_size = window_size
         
+        self.featuresHandler = featuresHandler(feature_dict=self.feature_dict) # This fills in the asset_data array
+        
 
     def reset(self):
         # Resets the environement to the initial state
@@ -256,7 +262,19 @@ class BittrexExchange(ExchangeEnvironment):
         self._fetch_candle_data(start, end)
         print('CANDLE DATA:')
         print(self.candle_df.tail())
-        self.df = build_features(self.candle_df, self.markets, self.feature_dict, train_amount=0) # This fills in the asset_data array
+
+        if self.verbose >=3:
+            print('building basic features')
+
+        self.df = self.featuresHandler.build_basic_features(self.candle_df, self.markets)
+        if self.verbose >=3:
+            print('training predictors')
+        test_df, train_df = self.featuresHandler.train_predictors(self.df, self.markets, train_amount=14)   # this trains the predictor
+        self.df = test_df.copy()
+        if self.verbose >=3:
+            print('predicting')
+        self.df = self.featuresHandler.predict(self.df)
+
         self.asset_data = self.df.values
         print('PREPARED DATA:')
         print(self.df.tail())
@@ -280,7 +298,10 @@ class BittrexExchange(ExchangeEnvironment):
         start = datetime.now() - timedelta(days=self.window_size)
 
         self._fetch_candle_data(start, end)
-        self.df = build_features(self.candle_df, self.markets, self.feature_dict, train_amount=0) # This fills in the asset_data array
+
+        self.df = self.featuresHandler.build_basic_features(self.candle_df, self.markets)
+        self.df = self.featuresHandler.predict(self.df)
+
         self.asset_data = self.df.values
         self.get_all_balances()
     
@@ -288,22 +309,23 @@ class BittrexExchange(ExchangeEnvironment):
 
 
     def _get_state(self):
-          # Returns the state (for now state, and observation are the same.)
-          # Note that the state could be a transformation of the observation, or
-          # multiple past observations stacked.)
-          state = np.empty(self.state_dim)  #assets_owned, USD
+        # Returns the state (for now state, and observation are the same.)
+        # Note that the state could be a transformation of the observation, or
+        # multiple past observations stacked.)
+        state = np.empty(self.state_dim)  #assets_owned, USD
 
-          penult_row = self.df.iloc[-2].values
-          ult_row = self.df.iloc[-1].values                #last row in slice_df an array
+        penult_row = self.df.iloc[-2].values
+        ult_row = self.df.iloc[-1].values                #last row in slice_df an array
 
-        #   for i, a in enumerate(self.markets):
-        #       ult_row[0+2*i] -= penult_row[0+2*i]                # correcting each market's close to be a delta rather than its value
-        #       ult_row[1+2*i] -= penult_row[1+2*i]                # correcting each market's volume to be a delta
+        # for i, a in enumerate(self.markets):
+        # ult_row[0+2*i] -= penult_row[0+2*i]                # correcting each market's close to be a delta rather than its value
+        # ult_row[1+2*i] -= penult_row[1+2*i]                # correcting each market's volume to be a delta
 
-          state = ult_row
+        state = ult_row
 
-
-          return state
+        if self.verbose >= 3:
+            print(self.df.iloc[-1])
+        return state
 
 
     def act(self, action):
@@ -372,10 +394,11 @@ class BittrexExchange(ExchangeEnvironment):
 
         btc_amt = self.assets_owned[0]*self.asset_prices[0]                              # !!! only stores BTC and USD for now
         cur_val = btc_amt + self.USD
-        new_info = {'$ of BTC':[btc_amt], 
-                    'Total Value':[cur_val],
-                    'Action': [action],
-                    'Timestamp':[self.df.iloc[-1].name]}
+        # new_info = {'$ of BTC':btc_amt, 
+        #             'Total Value':cur_val,
+        #             'Action': action,
+        #             'Timestamp':self.df.iloc[-1].name}
+        new_info = [btc_amt, cur_val, action, self.df.iloc[-1].name]
         self.log.update(new_info)
         if self.verbose >= 2:
             print('Log has been updated.')

@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd 
 
-def make_criteria(input_df,  target_change=.15, allowable_reversal=-.15, target_time_range=13, buy_not_sell=True):
+def make_criteria(input_df,  target_change=.105, allowable_reversal=-.05, target_time_range=10, buy_not_sell=True):
         # This is currently symmetric (prediction mirrored conditions for buy/sell signals)
         df = input_df.copy()
 
@@ -32,7 +32,6 @@ def make_criteria(input_df,  target_change=.15, allowable_reversal=-.15, target_
 
 
 def plot_make_criteria(input_df):
-    df = input_df.copy()
     fig, ax = plt.subplots(1, 1)
 
     input_df.plot(y='BTCClose', ax=ax)  
@@ -107,12 +106,25 @@ if __name__ == "__main__":
     from environments.environments import SimulatedCryptoExchange
     from datetime import datetime
     #date range to train on
-    start = datetime(2020, 8, 1)
-    end = datetime(2020, 9, 1) #- timedelta(days = 1)
+    start = datetime(2020, 1, 1)
+    end = datetime(2020, 2, 1) #- timedelta(days = 1)
     features = {  # 'sign': ['Close', 'Volume'],
-        
+        # 'EMA': [50, 80, 130],
+        'OBV': [],
+        'RSI': [],
+        # 'high': [],
+        # 'low': [],
+        'BollingerBands': [3, 4, 5],
+        'BBInd': [],
+        'BBWidth': [],
+        'discrete_derivative': ['BBWidth3', 'BBWidth4', 'BBWidth5'],
+        # 'time of day': [],
+        # 'stack': [2],
+        # 'rolling probability': ['BBInd3', 'BBWidth3']
+        # 'probability': ['BBInd3', 'BBWidth3']
+        # 'knn':[],
         }
-    sim_env = SimulatedCryptoExchange(granularity=5, feature_dict=features)
+    sim_env = SimulatedCryptoExchange(start, end, granularity=1, feature_dict=features, train_amount=14)
 
     df = sim_env.df.copy()              # This is the dataframe with all of the features built.
 
